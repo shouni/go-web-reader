@@ -36,14 +36,22 @@
 
 ```text
 go-web-reader/
-├── reader/             # 【CORE】マルチプロトコル・リーダー
-│   ├── universal.go    #   - URI 判定とディスパッチ (HTTP/GCS/S3/Local)
-│   └── adapter/        #   - 各プロトコルの Reader インターフェース適合
-├── extract/            # 【WEB】高精度コンテンツ抽出ロジック
-├── scraper/            # 【EXEC】並列実行・レート制限エンジン
-├── runner/             # 【STRATEGY】リトライ・フェーズ管理
-├── builder/            # 【DI】依存関係の構築とインスタンス生成
-└── ports/              # 【BASE】共通インターフェース・データ構造
+├── cmd/                # CLI コマンド定義
+│   ├── read.go         #   - 'read' サブコマンドの実装
+│   └── root.go         #   - ルートコマンド・フラグ・初期化
+└── internal/
+    ├── app/            # アプリケーション層
+    │   └── container.go #   - 実行時コンテナ（ライフサイクル・リソース管理）
+    ├── builder/        # 依存関係の注入 (DI)
+    │   ├── app.go      #   - アプリケーション全体の構築
+    │   ├── io.go       #   - 入出力関連の初期化
+    │   └── pipeline.go #   - 処理パイプラインの構成
+    ├── config/         # 設定管理
+    │   └── config.go   #   - 環境変数・フラグ構造体の定義
+    ├── domain/         # ドメイン層
+    │   └── ports.go    #   - 共通インターフェース・抽象定義
+    └── pipeline/       # ビジネスロジック / 実行フロー
+        └── pipeline.go #   - コンテンツ取得・変換のメインシーケンス
 ```
 
 -----
@@ -52,8 +60,6 @@ go-web-reader/
 
 * **[Go Web Exact](https://github.com/shouni/go-web-exact)**: 高精度なメインコンテンツ抽出エンジン。
 * **[Go Remote IO](https://github.com/shouni/go-remote-io)**: マルチクラウド I/O 抽象化レイヤー。
-* **`PuerkitoBio/goquery`**: HTML 要素の走査。
-* **`golang.org/x/sync`**: 並列処理制御。
 
 -----
 
