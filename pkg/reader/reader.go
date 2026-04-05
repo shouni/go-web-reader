@@ -40,7 +40,7 @@ func New(ctx context.Context, uri string) (*UniversalReader, error) {
 
 	universalReader := UniversalReader{}
 
-	if strings.HasPrefix(uri, securenet.SchemeHTTPS) || strings.HasPrefix(uri, "http://") {
+	if strings.HasPrefix(uri, securenet.SchemeHTTPS) || strings.HasPrefix(uri, securenet.SchemeHTTP) {
 		// HTTP/Web 抽出の処理
 		httpClient := httpkit.New(httpkit.DefaultHTTPTimeout)
 		extractor, err := extract.NewExtractor(httpClient)
@@ -61,6 +61,10 @@ func New(ctx context.Context, uri string) (*UniversalReader, error) {
 
 // Read は URI のスキームを判別し、適切なリーダーを返します
 func (r *UniversalReader) Read(ctx context.Context, uri string) (io.ReadCloser, error) {
+	ok, err := securenet.IsSafeURL(uri)
+	if err != nil || !ok {
+		return nil, fmt.Errorf("安全ではないURLです: %s", uri)
+	}
 	if r.extractor != nil && (strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, securenet.SchemeHTTPS)) {
 		text, hasBody, err := r.extractor.FetchAndExtractText(ctx, uri)
 		if err != nil {
