@@ -9,10 +9,10 @@ import (
 	"github.com/shouni/go-web-reader/internal/builder"
 )
 
-// readCmd は 'fetch' サブコマンドを定義します。
+// readCmd は 'read' サブコマンドを定義します。
 var readCmd = &cobra.Command{
 	Use:   "read",
-	Short: "コードレビューを実行し、その結果を標準出力に出力します。",
+	Short: "指定されたURIからコンテンツを読み込み、標準出力に出力します。",
 	Long:  `このコマンドは、指定されたURIからコンテキストを取得し、その結果を標準出力に直接表示します。`,
 	Args:  cobra.NoArgs,
 	RunE:  readCommand,

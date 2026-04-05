@@ -22,5 +22,6 @@ func NewPipeline(reader remoteio.Reader) *Pipeline {
 func (p *Pipeline) Execute(
 	ctx context.Context,
 ) (string, error) {
+	// TODO: 実際のコンテンツ取得・変換ロジックを実装する
 	return "", nil
 }
