@@ -5,6 +5,7 @@ import (
 
 	"github.com/shouni/go-http-kit/httpkit"
 	"github.com/shouni/go-remote-io/remoteio"
+	"github.com/shouni/go-web-reader/internal/domain"
 
 	"github.com/shouni/go-web-reader/internal/config"
 )
@@ -15,7 +16,7 @@ type Container struct {
 	// I/O and Storage
 	RemoteIO *RemoteIO
 	// Business Logic
-	//	Pipeline domain.Pipeline
+	Pipeline domain.Pipeline
 	// External Adapters
 	HTTPClient httpkit.Requester
 }

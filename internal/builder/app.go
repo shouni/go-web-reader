@@ -24,10 +24,8 @@ func BuildContainer(ctx context.Context, cfg *config.Config) (container *app.Con
 		}
 	}()
 
-	// 1. HttpClient (全アダプターの基盤)
 	httpClient := httpkit.New(config.DefaultHTTPTimeout)
 
-	// 2. I/O Infrastructure (マルチクラウクラウド対応)
 	rio, err := buildRemoteIO(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize IO components: %w", err)
@@ -39,6 +37,12 @@ func BuildContainer(ctx context.Context, cfg *config.Config) (container *app.Con
 		RemoteIO:   rio,
 		HTTPClient: httpClient,
 	}
+
+	p, err := buildPipeline(ctx, appCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build pipeline: %w", err)
+	}
+	appCtx.Pipeline = p
 
 	return appCtx, nil
 }
