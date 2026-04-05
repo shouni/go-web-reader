@@ -37,8 +37,11 @@
 ```text
 go-web-reader/
 ├── cmd/                # CLI コマンド定義
-│   ├── read.go         #   - 'read' サブコマンドの実装
+│   ├── read.go         #   - 'read' サブコマンドの実装 (pkg/reader を利用)
 │   └── root.go         #   - ルートコマンド・フラグ・初期化
+├── pkg/
+│   └── reader/         # 【PUBLIC】外部公開用エントリポイント
+│       └── reader.go   #   - ユニバーサル・リーダー (HTTP/GCS/S3 等のディスパッチ)
 └── internal/
     ├── app/            # アプリケーション層
     │   └── container.go #   - 実行時コンテナ（ライフサイクル・リソース管理）
