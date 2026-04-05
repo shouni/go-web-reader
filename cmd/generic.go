@@ -41,14 +41,16 @@ func genericCommand(cmd *cobra.Command, args []string) error {
 	}()
 
 	// 結果の出力
-	// ReviewMarkdown が空でない場合にのみ標準出力に出力する
-	printReviewResult("test")
+	// TODO: 実際のAIレビュー処理を実装し、その結果を渡す
+	// reviewResult, err := runAIReview(appCtx)
+	// if err != nil { ... }
+	printReviewResult("test") // FIXME: reviewResult に置き換える
 	slog.Info("レビュー結果を標準出力に出力しました。")
 
 	return nil
 }
 
-// printReviewResult は noPost 時に結果を標準出力します。
+// printReviewResult はレビュー結果を標準出力にフォーマットして表示します。
 func printReviewResult(result string) {
 	fmt.Println("\n--- 取得結果 ---")
 	fmt.Println(result)

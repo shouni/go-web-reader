@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 
 	"github.com/shouni/go-utils/envutil"
@@ -21,11 +22,12 @@ func (c *Config) Normalize() {
 	if c == nil {
 		return
 	}
+	c.GCSBucket = strings.TrimSpace(c.GCSBucket)
 }
 
 // LoadConfig は環境変数から設定を読み込みます。
 func LoadConfig() *Config {
 	return &Config{
-		GCSBucket: envutil.GetEnv("GCP_BUCKET", ""),
+		GCSBucket: envutil.GetEnv("GCS_BUCKET", ""),
 	}
 }
