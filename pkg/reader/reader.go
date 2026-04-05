@@ -30,15 +30,17 @@ func New(ctx context.Context, uri string) (*UniversalReader, error) {
 	if uri == "" {
 		return nil, fmt.Errorf("uri cannot be empty")
 	}
-
 	ok, err := securenet.IsSafeURL(uri)
-	if ok == false {
-		return nil, err
+	if err != nil {
+		return nil, fmt.Errorf("URLの安全性検証に失敗しました: %w", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("安全ではないURLです: %s", uri)
 	}
 
 	universalReader := UniversalReader{}
 
-	if strings.HasPrefix(uri, securenet.SchemeHTTPS) {
+	if strings.HasPrefix(uri, securenet.SchemeHTTPS) || strings.HasPrefix(uri, "http://") {
 		// HTTP/Web 抽出の処理
 		httpClient := httpkit.New(httpkit.DefaultHTTPTimeout)
 		extractor, err := extract.NewExtractor(httpClient)
@@ -46,47 +48,35 @@ func New(ctx context.Context, uri string) (*UniversalReader, error) {
 			return nil, fmt.Errorf("Extractorの初期化エラー: %w", err)
 		}
 		universalReader.extractor = extractor
+	} else {
+		// クラウドストレージ
+		reader, err := ioReader(ctx, uri)
+		if err != nil {
+			return nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
+		}
+		universalReader.reader = reader
 	}
-
-	// クラウドストレージ
-	reader, err := ioReader(ctx, uri)
-	if err != nil {
-		return nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
-	}
-	universalReader.reader = reader
-
 	return &universalReader, nil
 }
 
-// Open は URI のスキームを判別し、適切なリーダーを返します
-func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
-	if strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, "https://") {
-		// 1. HTTP/Web 抽出の処理
-		httpClient := httpkit.New(httpkit.DefaultHTTPTimeout)
-		extractor, err := extract.NewExtractor(httpClient)
-		if err != nil {
-			return nil, fmt.Errorf("Extractorの初期化エラー: %w", err)
-		}
-
-		// text (string) を取得
-		text, hasBody, err := extractor.FetchAndExtractText(ctx, uri)
+// Read は URI のスキームを判別し、適切なリーダーを返します
+func (r *UniversalReader) Read(ctx context.Context, uri string) (io.ReadCloser, error) {
+	if r.extractor != nil && (strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, securenet.SchemeHTTPS)) {
+		text, hasBody, err := r.extractor.FetchAndExtractText(ctx, uri)
 		if err != nil {
 			return nil, err
 		}
 		if !hasBody {
 			return nil, fmt.Errorf("コンテンツが見つかりませんでした: %s", uri)
 		}
-
-		// string を io.ReadCloser (NopCloser) に変換して返す
 		return io.NopCloser(strings.NewReader(text)), nil
 	}
 
-	reader, err := ioReader(ctx, uri)
-	if err != nil {
-		return nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
+	if r.reader != nil {
+		return r.reader.Open(ctx, uri)
 	}
 
-	return reader.Open(ctx, uri)
+	return nil, fmt.Errorf("適切なリーダーが初期化されていません: %s", uri)
 }
 
 // ioReader は、URIスキーム（例：GCS、S3）に基づいて適切なremoteio.Readerを解決するか、エラーを返します。
