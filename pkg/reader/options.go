@@ -28,21 +28,21 @@ func WithExtractor(extractor ports.Extractor) Option {
 }
 
 // WithSafeURLValidator は URL 安全性検証関数を差し替えます。
-func WithSafeURLValidator(fn func(string) (bool, error)) Option {
+func WithSafeURLValidator(fn safeURLFunc) Option {
 	return func(o *options) {
 		o.safeURL = fn
 	}
 }
 
 // WithGCSFactory は GCS ファクトリ生成処理を差し替えます。
-func WithGCSFactory(fn func(context.Context) (remoteio.ReadWriteFactory, error)) Option {
+func WithGCSFactory(fn storageFactoryFunc) Option {
 	return func(o *options) {
 		o.newGCSFactory = fn
 	}
 }
 
 // WithS3Factory は S3 ファクトリ生成処理を差し替えます。
-func WithS3Factory(fn func(context.Context) (remoteio.ReadWriteFactory, error)) Option {
+func WithS3Factory(fn storageFactoryFunc) Option {
 	return func(o *options) {
 		o.newS3Factory = fn
 	}
