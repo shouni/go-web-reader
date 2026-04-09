@@ -17,6 +17,16 @@ import (
 	"github.com/shouni/netarmor/securenet"
 )
 
+var (
+	isSafeURL     = securenet.IsSafeURL
+	newGCSFactory = func(ctx context.Context) (remoteio.ReadWriteFactory, error) {
+		return gcs.New(ctx)
+	}
+	newS3Factory = func(ctx context.Context) (remoteio.ReadWriteFactory, error) {
+		return s3.New(ctx)
+	}
+)
+
 // UniversalReader はあらゆるURIからデータを読み取るインターフェース
 type UniversalReader struct {
 	mu        sync.Mutex
@@ -48,7 +58,7 @@ func (r *UniversalReader) Read(ctx context.Context, uri string) (io.ReadCloser, 
 	if uri == "" {
 		return nil, fmt.Errorf("uri cannot be empty")
 	}
-	ok, err := securenet.IsSafeURL(uri)
+	ok, err := isSafeURL(uri)
 	if err != nil || !ok {
 		return nil, fmt.Errorf("安全ではないURLです: %s", uri)
 	}
@@ -113,9 +123,7 @@ func (r *UniversalReader) getGCSReader(ctx context.Context) (remoteio.Reader, er
 		return r.gcsReader, nil
 	}
 
-	reader, closer, err := newStorageReader(ctx, func(ctx context.Context) (remoteio.ReadWriteFactory, error) {
-		return gcs.New(ctx)
-	})
+	reader, closer, err := newStorageReader(ctx, newGCSFactory)
 	if err != nil {
 		return nil, fmt.Errorf("GCSリーダーの生成に失敗: %w", err)
 	}
@@ -134,9 +142,7 @@ func (r *UniversalReader) getS3Reader(ctx context.Context) (remoteio.Reader, err
 		return r.s3Reader, nil
 	}
 
-	reader, closer, err := newStorageReader(ctx, func(ctx context.Context) (remoteio.ReadWriteFactory, error) {
-		return s3.New(ctx)
-	})
+	reader, closer, err := newStorageReader(ctx, newS3Factory)
 	if err != nil {
 		return nil, fmt.Errorf("S3リーダーの生成に失敗: %w", err)
 	}
