@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -24,6 +25,18 @@ func (c *Config) Normalize() {
 	}
 	c.GCSBucket = strings.TrimSpace(c.GCSBucket)
 	c.SourceURL = strings.TrimSpace(c.SourceURL)
+}
+
+// Validate は必須設定の整合性を検証します。
+func (c *Config) Validate() error {
+	if c == nil {
+		return fmt.Errorf("config is required")
+	}
+	if c.SourceURL == "" {
+		return fmt.Errorf("source_url is required")
+	}
+
+	return nil
 }
 
 // LoadConfig は環境変数から設定を読み込みます。
