@@ -3,12 +3,12 @@ package reader
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/shouni/go-remote-io/remoteio"
+	"github.com/shouni/go-web-exact/v2/ports"
 )
 
 type stubExtractor struct {
@@ -72,10 +72,9 @@ func (s *stubFactory) Close() error {
 
 func TestReadHTTPUsesExtractor(t *testing.T) {
 	t.Parallel()
-	stubSafeURL(t, func(string) (bool, error) { return true, nil })
 
 	extractor := &stubExtractor{text: "hello world", hasBody: true}
-	r := &UniversalReader{extractor: extractor}
+	r := newTestReader(t, extractor)
 
 	stream, err := r.Read(context.Background(), "https://example.com/article")
 	if err != nil {
@@ -97,11 +96,8 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 
 func TestReadHTTPNoBodyReturnsError(t *testing.T) {
 	t.Parallel()
-	stubSafeURL(t, func(string) (bool, error) { return true, nil })
 
-	r := &UniversalReader{
-		extractor: &stubExtractor{hasBody: false},
-	}
+	r := newTestReader(t, &stubExtractor{hasBody: false})
 
 	_, err := r.Read(context.Background(), "https://example.com/empty")
 	if err == nil {
@@ -114,13 +110,10 @@ func TestReadHTTPNoBodyReturnsError(t *testing.T) {
 
 func TestReadGCSUsesInjectedReader(t *testing.T) {
 	t.Parallel()
-	stubSafeURL(t, func(string) (bool, error) { return true, nil })
 
 	storageReader := &stubReader{content: "gcs body"}
-	r := &UniversalReader{
-		extractor: &stubExtractor{},
-		gcsReader: storageReader,
-	}
+	r := newTestReader(t, &stubExtractor{})
+	r.gcsReader = storageReader
 
 	stream, err := r.Read(context.Background(), "gs://bucket/path.txt")
 	if err != nil {
@@ -142,13 +135,10 @@ func TestReadGCSUsesInjectedReader(t *testing.T) {
 
 func TestReadS3UsesInjectedReader(t *testing.T) {
 	t.Parallel()
-	stubSafeURL(t, func(string) (bool, error) { return true, nil })
 
 	storageReader := &stubReader{content: "s3 body"}
-	r := &UniversalReader{
-		extractor: &stubExtractor{},
-		s3Reader:  storageReader,
-	}
+	r := newTestReader(t, &stubExtractor{})
+	r.s3Reader = storageReader
 
 	stream, err := r.Read(context.Background(), "s3://bucket/path.txt")
 	if err != nil {
@@ -175,20 +165,18 @@ func TestReadRejectsInvalidInput(t *testing.T) {
 		name string
 		ctx  context.Context
 		uri  string
-		safe func(string) (bool, error)
+		opts []Option
 	}{
-		{name: "nil context", ctx: nil, uri: "https://example.com", safe: func(string) (bool, error) { return true, nil }},
-		{name: "empty uri", ctx: context.Background(), uri: "", safe: func(string) (bool, error) { return true, nil }},
-		{name: "unsafe uri", ctx: context.Background(), uri: "https://example.com/private", safe: func(string) (bool, error) { return false, nil }},
-		{name: "safe checker error", ctx: context.Background(), uri: "https://example.com/private", safe: func(string) (bool, error) { return false, fmt.Errorf("lookup failed") }},
+		{name: "nil context", ctx: nil, uri: "https://example.com"},
+		{name: "empty uri", ctx: context.Background(), uri: ""},
+		{name: "unsafe uri", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(string) (bool, error) { return false, nil })}},
+		{name: "safe checker error", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(string) (bool, error) { return false, errors.New("lookup failed") })}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			stubSafeURL(t, tt.safe)
-
-			r := &UniversalReader{extractor: &stubExtractor{}}
+			r := newTestReader(t, &stubExtractor{}, tt.opts...)
 
 			_, err := r.Read(tt.ctx, tt.uri)
 			if err == nil {
@@ -203,12 +191,11 @@ func TestCloseClosesManagedResources(t *testing.T) {
 
 	gcsCloser := &stubCloser{}
 	s3Closer := &stubCloser{}
-	r := &UniversalReader{
-		gcsReader: &stubReader{},
-		gcsCloser: gcsCloser,
-		s3Reader:  &stubReader{},
-		s3Closer:  s3Closer,
-	}
+	r := newTestReader(t, &stubExtractor{})
+	r.gcsReader = &stubReader{}
+	r.gcsCloser = gcsCloser
+	r.s3Reader = &stubReader{}
+	r.s3Closer = s3Closer
 
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -239,12 +226,19 @@ func TestNewStorageReaderClosesFactoryOnReaderError(t *testing.T) {
 	}
 }
 
-func stubSafeURL(t *testing.T, fn func(string) (bool, error)) {
+func newTestReader(t *testing.T, extractor ports.Extractor, opts ...Option) *UniversalReader {
 	t.Helper()
 
-	orig := isSafeURL
-	isSafeURL = fn
-	t.Cleanup(func() {
-		isSafeURL = orig
-	})
+	baseOpts := []Option{
+		WithExtractor(extractor),
+		WithSafeURLValidator(func(string) (bool, error) { return true, nil }),
+	}
+	baseOpts = append(baseOpts, opts...)
+
+	reader, err := New(baseOpts...)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	return reader
 }

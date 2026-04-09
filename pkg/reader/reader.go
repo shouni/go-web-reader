@@ -17,36 +17,85 @@ import (
 	"github.com/shouni/netarmor/securenet"
 )
 
-var (
-	isSafeURL     = securenet.IsSafeURL
-	newGCSFactory = func(ctx context.Context) (remoteio.ReadWriteFactory, error) {
-		return gcs.New(ctx)
+type safeURLFunc func(string) (bool, error)
+type storageFactoryFunc func(context.Context) (remoteio.ReadWriteFactory, error)
+
+type options struct {
+	extractor     ports.Extractor
+	safeURL       safeURLFunc
+	newGCSFactory storageFactoryFunc
+	newS3Factory  storageFactoryFunc
+}
+
+// Option は UniversalReader の依存を差し替えるためのオプションです。
+type Option func(*options)
+
+// WithExtractor はテキスト抽出器を差し替えます。
+func WithExtractor(extractor ports.Extractor) Option {
+	return func(o *options) {
+		o.extractor = extractor
 	}
-	newS3Factory = func(ctx context.Context) (remoteio.ReadWriteFactory, error) {
-		return s3.New(ctx)
+}
+
+// WithSafeURLValidator は URL 安全性検証関数を差し替えます。
+func WithSafeURLValidator(fn func(string) (bool, error)) Option {
+	return func(o *options) {
+		o.safeURL = fn
 	}
-)
+}
+
+// WithGCSFactory は GCS ファクトリ生成処理を差し替えます。
+func WithGCSFactory(fn func(context.Context) (remoteio.ReadWriteFactory, error)) Option {
+	return func(o *options) {
+		o.newGCSFactory = fn
+	}
+}
+
+// WithS3Factory は S3 ファクトリ生成処理を差し替えます。
+func WithS3Factory(fn func(context.Context) (remoteio.ReadWriteFactory, error)) Option {
+	return func(o *options) {
+		o.newS3Factory = fn
+	}
+}
 
 // UniversalReader はあらゆるURIからデータを読み取るインターフェース
 type UniversalReader struct {
-	mu        sync.Mutex
-	extractor ports.Extractor
-	gcsReader remoteio.Reader
-	gcsCloser io.Closer
-	s3Reader  remoteio.Reader
-	s3Closer  io.Closer
+	mu            sync.Mutex
+	extractor     ports.Extractor
+	safeURL       safeURLFunc
+	newGCSFactory storageFactoryFunc
+	newS3Factory  storageFactoryFunc
+	gcsReader     remoteio.Reader
+	gcsCloser     io.Closer
+	s3Reader      remoteio.Reader
+	s3Closer      io.Closer
 }
 
 // New はUniversalReaderの新しいインスタンスを生成します。
-func New() (*UniversalReader, error) {
-	httpClient := httpkit.New(httpkit.DefaultHTTPTimeout)
-	extractor, err := extract.NewExtractor(httpClient)
-	if err != nil {
-		return nil, fmt.Errorf("Extractorの初期化エラー: %w", err)
+func New(opts ...Option) (*UniversalReader, error) {
+	cfg := options{
+		safeURL:       securenet.IsSafeURL,
+		newGCSFactory: func(ctx context.Context) (remoteio.ReadWriteFactory, error) { return gcs.New(ctx) },
+		newS3Factory:  func(ctx context.Context) (remoteio.ReadWriteFactory, error) { return s3.New(ctx) },
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	if cfg.extractor == nil {
+		httpClient := httpkit.New(httpkit.DefaultHTTPTimeout)
+		extractor, err := extract.NewExtractor(httpClient)
+		if err != nil {
+			return nil, fmt.Errorf("Extractorの初期化エラー: %w", err)
+		}
+		cfg.extractor = extractor
 	}
 
 	return &UniversalReader{
-		extractor: extractor,
+		extractor:     cfg.extractor,
+		safeURL:       cfg.safeURL,
+		newGCSFactory: cfg.newGCSFactory,
+		newS3Factory:  cfg.newS3Factory,
 	}, nil
 }
 
@@ -58,7 +107,7 @@ func (r *UniversalReader) Read(ctx context.Context, uri string) (io.ReadCloser, 
 	if uri == "" {
 		return nil, fmt.Errorf("uri cannot be empty")
 	}
-	ok, err := isSafeURL(uri)
+	ok, err := r.safeURL(uri)
 	if err != nil || !ok {
 		return nil, fmt.Errorf("安全ではないURLです: %s", uri)
 	}
@@ -123,7 +172,7 @@ func (r *UniversalReader) getGCSReader(ctx context.Context) (remoteio.Reader, er
 		return r.gcsReader, nil
 	}
 
-	reader, closer, err := newStorageReader(ctx, newGCSFactory)
+	reader, closer, err := newStorageReader(ctx, r.newGCSFactory)
 	if err != nil {
 		return nil, fmt.Errorf("GCSリーダーの生成に失敗: %w", err)
 	}
@@ -142,7 +191,7 @@ func (r *UniversalReader) getS3Reader(ctx context.Context) (remoteio.Reader, err
 		return r.s3Reader, nil
 	}
 
-	reader, closer, err := newStorageReader(ctx, newS3Factory)
+	reader, closer, err := newStorageReader(ctx, r.newS3Factory)
 	if err != nil {
 		return nil, fmt.Errorf("S3リーダーの生成に失敗: %w", err)
 	}
