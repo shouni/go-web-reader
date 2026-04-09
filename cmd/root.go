@@ -20,8 +20,8 @@ func addAppPersistentFlags(rootCmd *cobra.Command) {
 
 // initAppPreRunE は HTTP クライアントの初期化とコンテキストへの格納を行います。
 func initAppPreRunE(cmd *cobra.Command, args []string) error {
-
-	return nil
+	opts.Normalize()
+	return opts.Validate()
 }
 
 func Execute() {
