@@ -5,11 +5,12 @@
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/shouni/go-web-reader)](https://github.com/shouni/go-web-reader/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 🚀 概要 (About) — Web とクラウドストレージを統合するユニバーサル・リーダー
+## 🚀 概要 (About) — Web とクラウドストレージを扱うユニバーサル・リーダー
 
-**Go Web Reader** は、Web サイトのメインコンテンツ抽出と、マルチクラウド（GCS/S3/Local）のファイル I/O を単一のインターフェースで統合する Go 言語向けライブラリです。
+**Go Web Reader** は、Web サイトの本文抽出とクラウドストレージ（GCS/S3）の読み取りを、単一のインターフェースで扱う Go 言語向けライブラリです。
 
-`https://`、`gs://`、`s3://`、あるいはローカルパスといった **URI** を渡すだけで、背後のストレージの違いや Web 解析の複雑さを意識することなく、クリーンなデータを `io.ReadCloser` として取得できます。
+`https://`、`gs://`、`s3://` といった **URI** を渡すだけで、背後のアクセス手段の違いを意識せずにコンテンツを取得できます。
+公開 API の中心は `pkg/reader` で、`reader.New()` でリーダーを生成し、`Read(ctx, uri)` 呼び出し時に URI スキームに応じて処理を切り替えます。
 
 -----
 
@@ -22,13 +23,13 @@
 
 ### ☁️ [remote] マルチプロトコル I/O
 
-* **Storage Agnostic**: GCS、S3、ローカルファイルシステムを透過的に扱えます。
-* **Seamless Integration**: クラウド上のドキュメント読み込みと Web サイトのスクレイピングを、全く同じコードパスで記述可能です。
+* **Storage Agnostic**: GCS と S3 を同じ `Read(ctx, uri)` インターフェースで扱えます。
+* **Lazy Initialization**: GCS/S3 のクライアントは必要になった時だけ初期化されます。
 
 ### ⚡ [orchestration] 実行オーケストレーション
 
-* **Concurrent Scraper**: `errgroup` による並列処理とレート制限を内蔵し、大量のリソースを一括で安全に読み込みます。
-* **Robust Runner**: 一時的なネットワークエラーやコンテンツ未検出時の自動リトライ戦略を標準搭載。
+* **CLI Entry Point**: `cmd/read.go` から URI を受け取り、パイプライン経由で結果を標準出力に出力します。
+* **Dependency Injection**: `internal/builder` で `reader` と `pipeline` を組み立て、`internal/pipeline` は抽象化された `Reader` に依存します。
 
 -----
 
@@ -37,25 +38,33 @@
 ```text
 go-web-reader/
 ├── cmd/                # CLI コマンド定義
-│   ├── read.go         #   - 'read' サブコマンドの実装 (pkg/reader を利用)
+│   ├── read.go         #   - 'read' サブコマンドの実行
 │   └── root.go         #   - ルートコマンド・フラグ・初期化
 ├── pkg/
 │   └── reader/         # 【PUBLIC】外部公開用エントリポイント
-│       └── reader.go   #   - ユニバーサル・リーダー (HTTP/GCS/S3 等のディスパッチ)
+│       ├── reader.go   #   - ユニバーサル・リーダー本体
+│       └── reader_test.go # - スキーム分岐とリソース管理のテスト
 └── internal/
     ├── app/            # アプリケーション層
-    │   └── container.go #   - 実行時コンテナ（ライフサイクル・リソース管理）
+    │   └── container.go #   - 実行時コンテナとクローズ対象の管理
     ├── builder/        # 依存関係の注入 (DI)
     │   ├── app.go      #   - アプリケーション全体の構築
-    │   ├── io.go       #   - 入出力関連の初期化
     │   └── pipeline.go #   - 処理パイプラインの構成
     ├── config/         # 設定管理
-    │   └── config.go   #   - 環境変数・フラグ構造体の定義
+    │   └── config.go   #   - フラグ構造体の定義と検証
     ├── domain/         # ドメイン層
     │   └── ports.go    #   - 共通インターフェース・抽象定義
     └── pipeline/       # ビジネスロジック / 実行フロー
-        └── pipeline.go #   - コンテンツ取得・変換のメインシーケンス
+        └── pipeline.go #   - Reader を使ったコンテンツ取得シーケンス
 ```
+
+-----
+
+## 🔧 実装メモ (Implementation Notes)
+
+* `pkg/reader.New()` は軽量な初期化だけを行い、実際の GCS/S3 クライアント生成は `Read(ctx, uri)` の呼び出し時に遅延実行されます。
+* `internal/pipeline` は具体実装に直接依存せず、`Reader` インターフェースを通して入力を読み込みます。
+* `internal/app.Container` は、アプリケーション終了時に `Close()` すべき依存をまとめて管理します。
 
 -----
 
