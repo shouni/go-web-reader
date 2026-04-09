@@ -33,7 +33,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config is required")
 	}
 	if c.SourceURL == "" {
-		return fmt.Errorf("uri is required")
+		return fmt.Errorf("source_url is required")
 	}
 
 	return nil

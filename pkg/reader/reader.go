@@ -150,12 +150,16 @@ func (r *UniversalReader) Close() error {
 
 	var errs []error
 	if r.gcsCloser != nil {
-		errs = append(errs, r.gcsCloser.Close())
+		if err := r.gcsCloser.Close(); err != nil {
+			errs = append(errs, err)
+		}
 		r.gcsCloser = nil
 		r.gcsReader = nil
 	}
 	if r.s3Closer != nil {
-		errs = append(errs, r.s3Closer.Close())
+		if err := r.s3Closer.Close(); err != nil {
+			errs = append(errs, err)
+		}
 		r.s3Closer = nil
 		r.s3Reader = nil
 	}
