@@ -101,10 +101,10 @@ func TestReadHTTPNoBodyReturnsError(t *testing.T) {
 
 	_, err := r.Open(context.Background(), "https://example.com/empty")
 	if err == nil {
-		t.Fatal("Read() error = nil, want error")
+		t.Fatal("Open() error = nil, want error")
 	}
 	if !strings.Contains(err.Error(), "コンテンツが見つかりませんでした") {
-		t.Fatalf("Read() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestReadGCSUsesInjectedReader(t *testing.T) {
 
 	stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
 	if err != nil {
-		t.Fatalf("Read() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
 	defer stream.Close()
 
@@ -142,7 +142,7 @@ func TestReadS3UsesInjectedReader(t *testing.T) {
 
 	stream, err := r.Open(context.Background(), "s3://bucket/path.txt")
 	if err != nil {
-		t.Fatalf("Read() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
 	defer stream.Close()
 
@@ -180,7 +180,7 @@ func TestReadRejectsInvalidInput(t *testing.T) {
 
 			_, err := r.Open(tt.ctx, tt.uri)
 			if err == nil {
-				t.Fatal("Read() error = nil, want error")
+				t.Fatal("Open() error = nil, want error")
 			}
 		})
 	}
