@@ -76,7 +76,7 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 	extractor := &stubExtractor{text: "hello world", hasBody: true}
 	r := newTestReader(t, extractor)
 
-	stream, err := r.Read(context.Background(), "https://example.com/article")
+	stream, err := r.Open(context.Background(), "https://example.com/article")
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)
 	}
@@ -99,7 +99,7 @@ func TestReadHTTPNoBodyReturnsError(t *testing.T) {
 
 	r := newTestReader(t, &stubExtractor{hasBody: false})
 
-	_, err := r.Read(context.Background(), "https://example.com/empty")
+	_, err := r.Open(context.Background(), "https://example.com/empty")
 	if err == nil {
 		t.Fatal("Read() error = nil, want error")
 	}
@@ -115,7 +115,7 @@ func TestReadGCSUsesInjectedReader(t *testing.T) {
 	r := newTestReader(t, &stubExtractor{})
 	r.gcsReader = storageReader
 
-	stream, err := r.Read(context.Background(), "gs://bucket/path.txt")
+	stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)
 	}
@@ -140,7 +140,7 @@ func TestReadS3UsesInjectedReader(t *testing.T) {
 	r := newTestReader(t, &stubExtractor{})
 	r.s3Reader = storageReader
 
-	stream, err := r.Read(context.Background(), "s3://bucket/path.txt")
+	stream, err := r.Open(context.Background(), "s3://bucket/path.txt")
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)
 	}
@@ -178,7 +178,7 @@ func TestReadRejectsInvalidInput(t *testing.T) {
 			t.Parallel()
 			r := newTestReader(t, &stubExtractor{}, tt.opts...)
 
-			_, err := r.Read(tt.ctx, tt.uri)
+			_, err := r.Open(tt.ctx, tt.uri)
 			if err == nil {
 				t.Fatal("Read() error = nil, want error")
 			}

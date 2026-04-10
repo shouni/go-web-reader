@@ -7,5 +7,6 @@ import (
 
 // ContentReader は、テキストやメッセージの生成に特化した最小のインターフェースです。
 type ContentReader interface {
-	Read(ctx context.Context, uri string) (io.ReadCloser, error)
+	Open(ctx context.Context, uri string) (io.ReadCloser, error)
+	io.Closer
 }
