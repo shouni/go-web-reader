@@ -78,7 +78,7 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 
 	stream, err := r.Open(context.Background(), "https://example.com/article")
 	if err != nil {
-		t.Fatalf("Read() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
 	defer stream.Close()
 
