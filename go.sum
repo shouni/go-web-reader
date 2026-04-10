@@ -132,8 +132,8 @@ github.com/shouni/go-utils v1.0.20 h1:gdjQfqJdY+uJI02FPNSE7B9GTIihGQ4DMjN36+0pd9
 github.com/shouni/go-utils v1.0.20/go.mod h1:IGMDiCaF1QlkT/roB0YTrNCUTcfcMhtnOUjG0e3AR8w=
 github.com/shouni/go-web-exact/v2 v2.2.0 h1:kAMnTpNClM57xk1WAsYABM8XEyxSK9KzEWgeY8fabYk=
 github.com/shouni/go-web-exact/v2 v2.2.0/go.mod h1:FmLnP27+2cD9ytxheAvnoWZkIMbt5gznEuCdG80Xslk=
-github.com/shouni/netarmor v1.0.1 h1:amRJcY59yn6Llgv4TJOu9YxzFkdUkddghyc7kGp0LQc=
-github.com/shouni/netarmor v1.0.1/go.mod h1:SOrb359QPM599FUJQ2GsRcUFOvJTaQ+L98Wo9Vr7xMk=
+github.com/shouni/netarmor v1.0.2 h1:R8UyVxqEF4oTWrfDQnag+CD8utQsr+XgVE/ZX+tTg3Q=
+github.com/shouni/netarmor v1.0.2/go.mod h1:SOrb359QPM599FUJQ2GsRcUFOvJTaQ+L98Wo9Vr7xMk=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
 github.com/spf13/cobra v1.10.2/go.mod h1:7C1pvHqHw5A4vrJfjNwvOdzYu0Gml16OCs2GRiTUUS4=
 github.com/spf13/pflag v1.0.9 h1:9exaQaMOCwffKiiiYk6/BndUBv+iRViNW+4lEMi0PvY=

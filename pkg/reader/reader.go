@@ -58,8 +58,8 @@ func New(opts ...Option) (*UniversalReader, error) {
 	}, nil
 }
 
-// Read は URI のスキームを判別し、適切なリーダーを返します
-func (r *UniversalReader) Read(ctx context.Context, uri string) (io.ReadCloser, error) {
+// Open は URI のスキームを判別し、適切なリーダーを返します
+func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("context is required")
 	}
