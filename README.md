@@ -10,7 +10,7 @@
 **Go Web Reader** は、Web サイトの本文抽出とクラウドストレージ（GCS/S3）の読み取りを、単一のインターフェースで扱う Go 言語向けライブラリです。
 
 `https://`、`gs://`、`s3://` といった **URI** を渡すだけで、背後のアクセス手段の違いを意識せずにコンテンツを取得できます。
-公開 API の中心は `pkg/reader` で、`reader.New()` でリーダーを生成し、`Read(ctx, uri)` 呼び出し時に URI スキームに応じて処理を切り替えます。
+公開 API の中心は `pkg/reader` で、`reader.New()` でリーダーを生成し、`Open(ctx, uri)` 呼び出し時に URI スキームに応じて処理を切り替えます。
 
 -----
 
@@ -23,7 +23,7 @@
 
 ### ☁️ [remote] マルチプロトコル I/O
 
-* **Storage Agnostic**: GCS と S3 を同じ `Read(ctx, uri)` インターフェースで扱えます。
+* **Storage Agnostic**: GCS と S3 を同じ `Open(ctx, uri)` インターフェースで扱えます。
 * **Lazy Initialization**: GCS/S3 のクライアントは必要になった時だけ初期化されます。
 
 ### ⚡ [orchestration] 実行オーケストレーション
