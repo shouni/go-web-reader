@@ -8,7 +8,7 @@ require (
 	github.com/shouni/go-remote-io v1.3.2
 	github.com/shouni/go-utils v1.0.20
 	github.com/shouni/go-web-exact/v2 v2.2.0
-	github.com/shouni/netarmor v1.0.1
+	github.com/shouni/netarmor v1.0.2
 	github.com/spf13/cobra v1.10.2
 )
 
