@@ -11,6 +11,8 @@ import (
 	"github.com/shouni/go-web-exact/v2/ports"
 )
 
+// --- Stubs ---
+
 type stubExtractor struct {
 	text    string
 	hasBody bool
@@ -23,6 +25,7 @@ func (s *stubExtractor) FetchAndExtractText(_ context.Context, url string) (stri
 	return s.text, s.hasBody, s.err
 }
 
+// remoteio.InputReader を満足させるスタブ
 type stubReader struct {
 	content  string
 	err      error
@@ -37,6 +40,12 @@ func (s *stubReader) Open(_ context.Context, path string) (io.ReadCloser, error)
 	return io.NopCloser(strings.NewReader(s.content)), nil
 }
 
+// Lister インターフェースの実装
+func (s *stubReader) List(_ context.Context, _ string, _ func(string) error) error { return nil }
+
+// Exister インターフェースの実装
+func (s *stubReader) Exists(_ context.Context, _ string) (bool, error) { return true, nil }
+
 type stubCloser struct {
 	closed int
 	err    error
@@ -47,28 +56,30 @@ func (s *stubCloser) Close() error {
 	return s.err
 }
 
+// remoteio.IOFactory を満足させるスタブ
 type stubFactory struct {
-	reader     remoteio.Reader
+	reader     *stubReader // 具体的なスタブを保持
 	readerErr  error
 	closeErr   error
 	closeCalls int
 }
 
-func (s *stubFactory) Reader() (remoteio.Reader, error) {
+func (s *stubFactory) InputReader() (remoteio.InputReader, error) {
 	if s.readerErr != nil {
 		return nil, s.readerErr
 	}
 	return s.reader, nil
 }
 
-func (s *stubFactory) Writer() (remoteio.Writer, error) {
-	return nil, nil
-}
+func (s *stubFactory) OutputWriter() (remoteio.OutputWriter, error) { return nil, nil }
+func (s *stubFactory) URLSigner() (remoteio.URLSigner, error)       { return nil, nil }
 
 func (s *stubFactory) Close() error {
 	s.closeCalls++
 	return s.closeErr
 }
+
+// --- Tests ---
 
 func TestReadHTTPUsesExtractor(t *testing.T) {
 	t.Parallel()
@@ -215,7 +226,7 @@ func TestNewStorageReaderClosesFactoryOnReaderError(t *testing.T) {
 		readerErr: errors.New("reader failed"),
 	}
 
-	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.ReadWriteFactory, error) {
+	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.IOFactory, error) {
 		return factory, nil
 	})
 	if err == nil {

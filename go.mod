@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/shouni/clibase v1.0.3
 	github.com/shouni/go-http-kit v1.4.1
-	github.com/shouni/go-remote-io v1.3.3
+	github.com/shouni/go-remote-io v1.4.0
 	github.com/shouni/go-utils v1.0.20
 	github.com/shouni/go-web-exact/v2 v2.2.1
 	github.com/shouni/netarmor v1.0.3
