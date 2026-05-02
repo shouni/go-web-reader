@@ -4,6 +4,10 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/shouni/go-web-reader)](https://golang.org/)
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/shouni/go-web-reader)](https://github.com/shouni/go-web-reader/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Report Card](https://goreportcard.com/badge/github.com/shouni/go-web-reader)](https://goreportcard.com/report/github.com/shouni/go-web-reader)
+[![Go Reference](https://pkg.go.dev/badge/github.com/shouni/go-web-reader.svg)](https://pkg.go.dev/github.com/shouni/go-web-reader)
+[![Status](https://img.shields.io/badge/Status-Completed-brightgreen)](#)
+
 
 ## 🚀 概要 (About) — Web とクラウドストレージを扱うユニバーサル・リーダー
 
