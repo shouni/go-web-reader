@@ -8,7 +8,7 @@ import (
 )
 
 type safeURLFunc func(string) (bool, error)
-type storageFactoryFunc func(context.Context) (remoteio.ReadWriteFactory, error)
+type storageFactoryFunc func(context.Context) (remoteio.IOFactory, error)
 
 type options struct {
 	extractor     ports.Extractor

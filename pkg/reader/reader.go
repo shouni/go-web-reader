@@ -34,8 +34,8 @@ type UniversalReader struct {
 func New(opts ...Option) (*UniversalReader, error) {
 	cfg := options{
 		safeURL:       securenet.IsSafeURL,
-		newGCSFactory: func(ctx context.Context) (remoteio.ReadWriteFactory, error) { return gcs.New(ctx) },
-		newS3Factory:  func(ctx context.Context) (remoteio.ReadWriteFactory, error) { return s3.New(ctx) },
+		newGCSFactory: func(ctx context.Context) (remoteio.IOFactory, error) { return gcs.New(ctx) },
+		newS3Factory:  func(ctx context.Context) (remoteio.IOFactory, error) { return s3.New(ctx) },
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -167,14 +167,14 @@ func (r *UniversalReader) getS3Reader(ctx context.Context) (remoteio.Reader, err
 // newStorageReader は、ストレージリーダーの生成とクロージャの管理
 func newStorageReader(
 	ctx context.Context,
-	newFactory func(context.Context) (remoteio.ReadWriteFactory, error),
+	newFactory func(context.Context) (remoteio.IOFactory, error),
 ) (remoteio.Reader, io.Closer, error) {
 	factory, err := newFactory(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ストレージファクトリの生成に失敗: %w", err)
 	}
 
-	reader, err := factory.Reader()
+	reader, err := factory.InputReader()
 	if err != nil {
 		_ = factory.Close()
 		return nil, nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
