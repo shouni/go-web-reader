@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -24,10 +25,13 @@ type UniversalReader struct {
 	safeURL       safeURLFunc
 	newGCSFactory storageFactoryFunc
 	newS3Factory  storageFactoryFunc
-	gcsReader     remoteio.Reader
-	gcsCloser     io.Closer
-	s3Reader      remoteio.Reader
-	s3Closer      io.Closer
+	gcs           storageReaderCache
+	s3            storageReaderCache
+}
+
+type storageReaderCache struct {
+	reader remoteio.Reader
+	closer io.Closer
 }
 
 // New はUniversalReaderの新しいインスタンスを生成します。
@@ -49,6 +53,15 @@ func New(opts ...Option) (*UniversalReader, error) {
 		}
 		cfg.extractor = extractor
 	}
+	if cfg.safeURL == nil {
+		return nil, fmt.Errorf("safe URL validator is required")
+	}
+	if cfg.newGCSFactory == nil {
+		return nil, fmt.Errorf("GCS factory is required")
+	}
+	if cfg.newS3Factory == nil {
+		return nil, fmt.Errorf("S3 factory is required")
+	}
 
 	return &UniversalReader{
 		extractor:     cfg.extractor,
@@ -67,7 +80,10 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 		return nil, fmt.Errorf("uri cannot be empty")
 	}
 	ok, err := r.safeURL(uri)
-	if err != nil || !ok {
+	if err != nil {
+		return nil, fmt.Errorf("URL安全性検証に失敗しました: %w", err)
+	}
+	if !ok {
 		return nil, fmt.Errorf("安全ではないURLです: %s", uri)
 	}
 
@@ -108,19 +124,10 @@ func (r *UniversalReader) Close() error {
 	defer r.mu.Unlock()
 
 	var errs []error
-	if r.gcsCloser != nil {
-		if err := r.gcsCloser.Close(); err != nil {
+	for _, cache := range []*storageReaderCache{&r.gcs, &r.s3} {
+		if err := cache.close(); err != nil {
 			errs = append(errs, err)
 		}
-		r.gcsCloser = nil
-		r.gcsReader = nil
-	}
-	if r.s3Closer != nil {
-		if err := r.s3Closer.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		r.s3Closer = nil
-		r.s3Reader = nil
 	}
 
 	return errors.Join(errs...)
@@ -128,40 +135,35 @@ func (r *UniversalReader) Close() error {
 
 // getGCSReader は、ストレージリーダーの生成とクロージャの管理
 func (r *UniversalReader) getGCSReader(ctx context.Context) (remoteio.Reader, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.gcsReader != nil {
-		return r.gcsReader, nil
-	}
-
-	reader, closer, err := newStorageReader(ctx, r.newGCSFactory)
-	if err != nil {
-		return nil, fmt.Errorf("GCSリーダーの生成に失敗: %w", err)
-	}
-	r.gcsReader = reader
-	r.gcsCloser = closer
-
-	return r.gcsReader, nil
+	return r.getStorageReader(ctx, &r.gcs, r.newGCSFactory, "GCS")
 }
 
 // getS3Reader は、S3リーダーの取得と管理
 func (r *UniversalReader) getS3Reader(ctx context.Context) (remoteio.Reader, error) {
+	return r.getStorageReader(ctx, &r.s3, r.newS3Factory, "S3")
+}
+
+func (r *UniversalReader) getStorageReader(
+	ctx context.Context,
+	cache *storageReaderCache,
+	newFactory storageFactoryFunc,
+	label string,
+) (remoteio.Reader, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.s3Reader != nil {
-		return r.s3Reader, nil
+	if cache.reader != nil {
+		return cache.reader, nil
 	}
 
-	reader, closer, err := newStorageReader(ctx, r.newS3Factory)
+	reader, closer, err := newStorageReader(ctx, newFactory)
 	if err != nil {
-		return nil, fmt.Errorf("S3リーダーの生成に失敗: %w", err)
+		return nil, fmt.Errorf("%sリーダーの生成に失敗: %w", label, err)
 	}
-	r.s3Reader = reader
-	r.s3Closer = closer
+	cache.reader = reader
+	cache.closer = closer
 
-	return r.s3Reader, nil
+	return cache.reader, nil
 }
 
 // newStorageReader は、ストレージリーダーの生成とクロージャの管理
@@ -179,6 +181,37 @@ func newStorageReader(
 		_ = factory.Close()
 		return nil, nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
 	}
+	if isNilStorageReader(reader) {
+		_ = factory.Close()
+		return nil, nil, fmt.Errorf("リーダーの生成に失敗: reader is nil")
+	}
 
 	return reader, factory, nil
+}
+
+func isNilStorageReader(reader remoteio.Reader) bool {
+	if reader == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(reader)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func (c *storageReaderCache) close() error {
+	if c.closer == nil {
+		c.reader = nil
+		return nil
+	}
+
+	err := c.closer.Close()
+	c.reader = nil
+	c.closer = nil
+
+	return err
 }
