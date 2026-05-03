@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -181,26 +180,13 @@ func newStorageReader(
 		_ = factory.Close()
 		return nil, nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
 	}
-	if isNilStorageReader(reader) {
+
+	if reader == nil {
 		_ = factory.Close()
 		return nil, nil, fmt.Errorf("リーダーの生成に失敗: reader is nil")
 	}
 
 	return reader, factory, nil
-}
-
-func isNilStorageReader(reader remoteio.Reader) bool {
-	if reader == nil {
-		return true
-	}
-
-	value := reflect.ValueOf(reader)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
 }
 
 func (c *storageReaderCache) close() error {

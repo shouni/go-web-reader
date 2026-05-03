@@ -40,11 +40,9 @@ func (s *stubReader) Open(_ context.Context, path string) (io.ReadCloser, error)
 	return io.NopCloser(strings.NewReader(s.content)), nil
 }
 
-// Lister インターフェースの実装
+// Lister / Exister インターフェースの実装（必要に応じて）
 func (s *stubReader) List(_ context.Context, _ string, _ func(string) error) error { return nil }
-
-// Exister インターフェースの実装
-func (s *stubReader) Exists(_ context.Context, _ string) (bool, error) { return true, nil }
+func (s *stubReader) Exists(_ context.Context, _ string) (bool, error)             { return true, nil }
 
 type stubCloser struct {
 	closed int
@@ -58,7 +56,7 @@ func (s *stubCloser) Close() error {
 
 // remoteio.IOFactory を満足させるスタブ
 type stubFactory struct {
-	reader     *stubReader // 具体的なスタブを保持
+	reader     remoteio.InputReader // 指標：具象型ではなくインターフェースで保持するように変更
 	readerErr  error
 	closeErr   error
 	closeCalls int
@@ -68,6 +66,7 @@ func (s *stubFactory) InputReader() (remoteio.InputReader, error) {
 	if s.readerErr != nil {
 		return nil, s.readerErr
 	}
+	// ここが nil であれば、呼び出し側で reader == nil として正しく判定されるのだ
 	return s.reader, nil
 }
 
@@ -279,6 +278,8 @@ func TestNewStorageReaderClosesFactoryOnReaderError(t *testing.T) {
 func TestNewStorageReaderClosesFactoryOnNilReader(t *testing.T) {
 	t.Parallel()
 
+	// 修正ポイント：reader フィールドが初期値(nil)のままの状態。
+	// これにより InputReader() が (remoteio.InputReader)(nil) を返すことをシミュレート。
 	factory := &stubFactory{}
 
 	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.IOFactory, error) {
@@ -286,6 +287,9 @@ func TestNewStorageReaderClosesFactoryOnNilReader(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("newStorageReader() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "reader is nil") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 	if factory.closeCalls != 1 {
 		t.Fatalf("factory.closeCalls = %d, want 1", factory.closeCalls)

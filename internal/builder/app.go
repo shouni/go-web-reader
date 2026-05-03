@@ -19,13 +19,27 @@ func BuildContainer(cfg *config.Config) (container *app.Container, err error) {
 		Config: cfg,
 	}
 
+	defer func() {
+		if err != nil {
+			for _, c := range appCtx.Closers {
+				_ = c.Close()
+			}
+		}
+	}()
+
+	// 1. Reader の初期化
 	reader, err := pkgreader.New()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize reader: %w", err)
 	}
 	appCtx.Closers = append(appCtx.Closers, reader)
 
-	appCtx.Pipeline = pipeline.NewPipeline(cfg.SourceURL, reader)
+	// 2. Pipeline の構築
+	p, err := pipeline.NewPipeline(cfg.SourceURL, reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build pipeline: %w", err)
+	}
+	appCtx.Pipeline = p
 
 	return appCtx, nil
 }

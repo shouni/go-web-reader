@@ -19,28 +19,27 @@ type Pipeline struct {
 }
 
 // NewPipeline は、Pipeline を生成します。
-func NewPipeline(sourceURL string, reader ContentReader) *Pipeline {
-	return &Pipeline{
-		sourceURL: strings.TrimSpace(sourceURL),
-		reader:    reader,
+func NewPipeline(sourceURL string, reader ContentReader) (*Pipeline, error) {
+	if sourceURL == "" {
+		return nil, fmt.Errorf("source URL is required")
 	}
+	if reader == nil {
+		return nil, fmt.Errorf("content reader is required")
+	}
+
+	return &Pipeline{
+		sourceURL: sourceURL,
+		reader:    reader,
+	}, nil
 }
 
-// Execute は、すべての依存関係を構築し実行します。
-func (p *Pipeline) Execute(
-	ctx context.Context,
-) (string, error) {
+// Execute は、設定されたソースからコンテンツを読み取り、実行結果を返します。
+func (p *Pipeline) Execute(ctx context.Context) (string, error) {
 	if p == nil {
-		return "", fmt.Errorf("pipeline is required")
+		return "", fmt.Errorf("pipeline instance is nil")
 	}
 	if ctx == nil {
 		return "", fmt.Errorf("context is required")
-	}
-	if p.sourceURL == "" {
-		return "", fmt.Errorf("source URL is required")
-	}
-	if p.reader == nil {
-		return "", fmt.Errorf("content reader is required")
 	}
 
 	stream, err := p.reader.Open(ctx, p.sourceURL)
@@ -50,9 +49,7 @@ func (p *Pipeline) Execute(
 	if stream == nil {
 		return "", fmt.Errorf("content reader returned nil stream")
 	}
-	defer func() {
-		_ = stream.Close()
-	}()
+	defer stream.Close()
 
 	body, err := io.ReadAll(stream)
 	if err != nil {
