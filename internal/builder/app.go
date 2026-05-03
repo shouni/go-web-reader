@@ -21,9 +21,7 @@ func BuildContainer(cfg *config.Config) (container *app.Container, err error) {
 
 	defer func() {
 		if err != nil {
-			for _, c := range appCtx.Closers {
-				_ = c.Close()
-			}
+			_ = appCtx.Close()
 		}
 	}()
 
