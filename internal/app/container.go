@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"io"
 
 	"github.com/shouni/go-web-reader/internal/config"
@@ -16,10 +17,19 @@ type Container struct {
 }
 
 // Close は、Container が保持するすべての外部接続リソースを安全に解放します。
-func (c *Container) Close() {
+func (c *Container) Close() error {
+	if c == nil {
+		return nil
+	}
+
+	var errs []error
 	for _, closer := range c.Closers {
 		if closer != nil {
-			_ = closer.Close()
+			if err := closer.Close(); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
+
+	return errors.Join(errs...)
 }

@@ -25,13 +25,15 @@ var readCmd = &cobra.Command{
 // readCommand は、指定されたURIからコンテキストを取得し、その結果を標準出力に直接表示します。
 func readCommand(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	appCtx, err := builder.BuildContainer(ctx, opts)
+	appCtx, err := builder.BuildContainer(opts)
 	if err != nil {
 		return fmt.Errorf("アプリケーションコンテキストの構築に失敗しました: %w", err)
 	}
 	defer func() {
 		slog.Info("♻️ アプリケーションコンテキストをクローズ中...")
-		appCtx.Close()
+		if err := appCtx.Close(); err != nil {
+			slog.Warn("アプリケーションコンテキストのクローズに失敗しました。", "error", err)
+		}
 	}()
 
 	result, err := appCtx.Pipeline.Execute(ctx)

@@ -40,11 +40,9 @@ func (s *stubReader) Open(_ context.Context, path string) (io.ReadCloser, error)
 	return io.NopCloser(strings.NewReader(s.content)), nil
 }
 
-// Lister インターフェースの実装
+// Lister / Exister インターフェースの実装（必要に応じて）
 func (s *stubReader) List(_ context.Context, _ string, _ func(string) error) error { return nil }
-
-// Exister インターフェースの実装
-func (s *stubReader) Exists(_ context.Context, _ string) (bool, error) { return true, nil }
+func (s *stubReader) Exists(_ context.Context, _ string) (bool, error)             { return true, nil }
 
 type stubCloser struct {
 	closed int
@@ -58,7 +56,7 @@ func (s *stubCloser) Close() error {
 
 // remoteio.IOFactory を満足させるスタブ
 type stubFactory struct {
-	reader     *stubReader // 具体的なスタブを保持
+	reader     remoteio.InputReader // 指標：具象型ではなくインターフェースで保持するように変更
 	readerErr  error
 	closeErr   error
 	closeCalls int
@@ -68,6 +66,7 @@ func (s *stubFactory) InputReader() (remoteio.InputReader, error) {
 	if s.readerErr != nil {
 		return nil, s.readerErr
 	}
+	// ここが nil であれば、呼び出し側で reader == nil として正しく判定されるのだ
 	return s.reader, nil
 }
 
@@ -124,7 +123,7 @@ func TestReadGCSUsesInjectedReader(t *testing.T) {
 
 	storageReader := &stubReader{content: "gcs body"}
 	r := newTestReader(t, &stubExtractor{})
-	r.gcsReader = storageReader
+	r.gcs.reader = storageReader
 
 	stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
 	if err != nil {
@@ -149,7 +148,7 @@ func TestReadS3UsesInjectedReader(t *testing.T) {
 
 	storageReader := &stubReader{content: "s3 body"}
 	r := newTestReader(t, &stubExtractor{})
-	r.s3Reader = storageReader
+	r.s3.reader = storageReader
 
 	stream, err := r.Open(context.Background(), "s3://bucket/path.txt")
 	if err != nil {
@@ -172,6 +171,7 @@ func TestReadS3UsesInjectedReader(t *testing.T) {
 func TestReadRejectsInvalidInput(t *testing.T) {
 	t.Parallel()
 
+	safeCheckErr := errors.New("lookup failed")
 	tests := []struct {
 		name string
 		ctx  context.Context
@@ -181,7 +181,7 @@ func TestReadRejectsInvalidInput(t *testing.T) {
 		{name: "nil context", ctx: nil, uri: "https://example.com"},
 		{name: "empty uri", ctx: context.Background(), uri: ""},
 		{name: "unsafe uri", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(string) (bool, error) { return false, nil })}},
-		{name: "safe checker error", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(string) (bool, error) { return false, errors.New("lookup failed") })}},
+		{name: "safe checker error", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(string) (bool, error) { return false, safeCheckErr })}},
 	}
 
 	for _, tt := range tests {
@@ -197,16 +197,54 @@ func TestReadRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestReadWrapsSafeCheckerError(t *testing.T) {
+	t.Parallel()
+
+	safeCheckErr := errors.New("lookup failed")
+	r := newTestReader(t, &stubExtractor{}, WithSafeURLValidator(func(string) (bool, error) {
+		return false, safeCheckErr
+	}))
+
+	_, err := r.Open(context.Background(), "https://example.com/private")
+	if !errors.Is(err, safeCheckErr) {
+		t.Fatalf("Open() error = %v, want wrapping %v", err, safeCheckErr)
+	}
+}
+
+func TestNewRejectsNilRequiredDependencies(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		opt  Option
+	}{
+		{name: "safe URL validator", opt: WithSafeURLValidator(nil)},
+		{name: "GCS factory", opt: WithGCSFactory(nil)},
+		{name: "S3 factory", opt: WithS3Factory(nil)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := New(WithExtractor(&stubExtractor{}), tt.opt)
+			if err == nil {
+				t.Fatal("New() error = nil, want error")
+			}
+		})
+	}
+}
+
 func TestCloseClosesManagedResources(t *testing.T) {
 	t.Parallel()
 
 	gcsCloser := &stubCloser{}
 	s3Closer := &stubCloser{}
 	r := newTestReader(t, &stubExtractor{})
-	r.gcsReader = &stubReader{}
-	r.gcsCloser = gcsCloser
-	r.s3Reader = &stubReader{}
-	r.s3Closer = s3Closer
+	r.gcs.reader = &stubReader{}
+	r.gcs.closer = gcsCloser
+	r.s3.reader = &stubReader{}
+	r.s3.closer = s3Closer
 
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -214,7 +252,7 @@ func TestCloseClosesManagedResources(t *testing.T) {
 	if gcsCloser.closed != 1 || s3Closer.closed != 1 {
 		t.Fatalf("close counts = (%d, %d), want (1, 1)", gcsCloser.closed, s3Closer.closed)
 	}
-	if r.gcsReader != nil || r.gcsCloser != nil || r.s3Reader != nil || r.s3Closer != nil {
+	if r.gcs.reader != nil || r.gcs.closer != nil || r.s3.reader != nil || r.s3.closer != nil {
 		t.Fatal("managed resources were not cleared")
 	}
 }
@@ -231,6 +269,27 @@ func TestNewStorageReaderClosesFactoryOnReaderError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("newStorageReader() error = nil, want error")
+	}
+	if factory.closeCalls != 1 {
+		t.Fatalf("factory.closeCalls = %d, want 1", factory.closeCalls)
+	}
+}
+
+func TestNewStorageReaderClosesFactoryOnNilReader(t *testing.T) {
+	t.Parallel()
+
+	// 修正ポイント：reader フィールドが初期値(nil)のままの状態。
+	// これにより InputReader() が (remoteio.InputReader)(nil) を返すことをシミュレート。
+	factory := &stubFactory{}
+
+	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.IOFactory, error) {
+		return factory, nil
+	})
+	if err == nil {
+		t.Fatal("newStorageReader() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "reader is nil") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 	if factory.closeCalls != 1 {
 		t.Fatalf("factory.closeCalls = %d, want 1", factory.closeCalls)
