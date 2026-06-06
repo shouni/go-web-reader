@@ -4,10 +4,9 @@ go 1.26
 
 require (
 	github.com/shouni/clibase v1.0.3
-	github.com/shouni/go-http-kit v1.4.1
-	github.com/shouni/go-remote-io v1.4.0
-	github.com/shouni/go-utils v1.0.20
-	github.com/shouni/go-web-exact/v2 v2.2.1
+	github.com/shouni/go-http-kit v1.4.2
+	github.com/shouni/go-remote-io v1.5.2
+	github.com/shouni/go-web-exact/v2 v2.2.2
 	github.com/shouni/netarmor v1.0.3
 	github.com/spf13/cobra v1.10.2
 )
@@ -62,6 +61,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/shouni/go-utils v1.0.20 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
@@ -73,12 +73,12 @@ require (
 	go.opentelemetry.io/otel/sdk v1.42.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.42.0 // indirect
 	go.opentelemetry.io/otel/trace v1.42.0 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
-	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/api v0.273.0 // indirect
 	google.golang.org/genproto v0.0.0-20260316180232-0b37fe3546d5 // indirect
