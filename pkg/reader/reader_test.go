@@ -159,6 +159,48 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 	}
 }
 
+func TestNewAcceptsDoOnlyHTTPClientWithDefaultExtractor(t *testing.T) {
+	t.Parallel()
+
+	r, err := New(
+		WithHTTPClient(&stubHTTPClient{}),
+		WithSafeURLValidator(func(string) (bool, error) { return true, nil }),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if r == nil {
+		t.Fatal("New() reader = nil")
+	}
+}
+
+func TestReadHTTPFallsBackForMalformedContentType(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "fallback text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: `text/html; charset="`,
+		body:        "<html>fallback</html>",
+	}))
+
+	stream, err := r.Open(context.Background(), "https://example.com/malformed-content-type")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "fallback text" {
+		t.Fatalf("body = %q, want %q", got, "fallback text")
+	}
+	if extractor.extractCalls != 1 {
+		t.Fatalf("extractor.extractCalls = %d, want 1", extractor.extractCalls)
+	}
+}
+
 func TestReadHTTPNoBodyReturnsError(t *testing.T) {
 	t.Parallel()
 

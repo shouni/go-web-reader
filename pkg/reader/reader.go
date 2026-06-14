@@ -44,11 +44,7 @@ func New(opts ...Option) (*UniversalReader, error) {
 		cfg.httpClient = httpkit.New(httpkit.DefaultHTTPTimeout)
 	}
 	if cfg.extractor == nil {
-		fetcher, ok := cfg.httpClient.(ports.Fetcher)
-		if !ok {
-			return nil, fmt.Errorf("Extractorの初期化エラー: HTTP client must implement FetchBytes")
-		}
-		extractor, err := extract.NewExtractor(fetcher)
+		extractor, err := extract.NewExtractor(httpClientFetcher{client: cfg.httpClient})
 		if err != nil {
 			return nil, fmt.Errorf("Extractorの初期化エラー: %w", err)
 		}

@@ -35,8 +35,6 @@ func WithExtractor(extractor ports.Extractor) Option {
 }
 
 // WithHTTPClient は HTTP(S) の取得に使うクライアントを差し替えます。
-//
-// デフォルトの Extractor を使う場合、client は ports.Fetcher も満たす必要があります。
 func WithHTTPClient(client HTTPClient) Option {
 	return func(o *options) {
 		o.httpClient = client

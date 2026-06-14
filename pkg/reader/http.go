@@ -11,6 +11,33 @@ import (
 	"github.com/shouni/go-http-kit/httpkit"
 )
 
+var supportedMediaTypes = []string{
+	"text/html",
+	"application/xhtml+xml",
+	"text/plain",
+	"text/markdown",
+	"text/x-markdown",
+}
+
+type httpClientFetcher struct {
+	client HTTPClient
+}
+
+// FetchBytes は HTTPClient を go-web-exact の ports.Fetcher として使うためのアダプタです。
+func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, error) {
+	req, err := newHTTPRequest(ctx, uri)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTPリクエスト失敗: %w", err)
+	}
+
+	return httpkit.HandleResponse(resp)
+}
+
 // openHTTP は HTTP(S) URI を Content-Type ごとに処理して読み取りストリームを返します。
 func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadCloser, error) {
 	resp, err := r.fetchHTTP(ctx, uri)
@@ -18,10 +45,14 @@ func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadClos
 		return nil, err
 	}
 
-	contentType, err := mediaType(resp.Header.Get("Content-Type"))
+	rawContentType := resp.Header.Get("Content-Type")
+	contentType, err := mediaType(rawContentType)
 	if err != nil {
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("Content-Typeの解析に失敗しました: %w", err)
+		contentType = fallbackMediaType(rawContentType)
+		if contentType == "" {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("Content-Typeの解析に失敗しました: %w", err)
+		}
 	}
 
 	switch contentType {
@@ -40,13 +71,10 @@ func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadClos
 
 // fetchHTTP は HTTP GET を実行し、成功レスポンスを返します。
 func (r *UniversalReader) fetchHTTP(ctx context.Context, uri string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	req, err := newHTTPRequest(ctx, uri)
 	if err != nil {
-		return nil, fmt.Errorf("HTTPリクエスト作成失敗: %w", err)
+		return nil, err
 	}
-	req.Header.Set("User-Agent", httpkit.UserAgent)
-	req.Header.Set("Accept", "text/html, application/xhtml+xml, text/plain, text/markdown, text/x-markdown")
-
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTPリクエスト失敗: %w", err)
@@ -63,6 +91,18 @@ func (r *UniversalReader) fetchHTTP(ctx context.Context, uri string) (*http.Resp
 	}
 
 	return resp, nil
+}
+
+// newHTTPRequest は reader 共通の HTTP GET リクエストを生成します。
+func newHTTPRequest(ctx context.Context, uri string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	if err != nil {
+		return nil, fmt.Errorf("HTTPリクエスト作成失敗: %w", err)
+	}
+	req.Header.Set("User-Agent", httpkit.UserAgent)
+	req.Header.Set("Accept", strings.Join(supportedMediaTypes, ", "))
+
+	return req, nil
 }
 
 // openExtractedHTML は取得済み HTML から本文テキストを抽出して読み取りストリームを返します。
@@ -90,4 +130,15 @@ func mediaType(contentType string) (string, error) {
 		return "", err
 	}
 	return strings.ToLower(mediaType), nil
+}
+
+// fallbackMediaType は不正な Content-Type ヘッダーから既知の media type を推定します。
+func fallbackMediaType(contentType string) string {
+	normalized := strings.ToLower(contentType)
+	for _, mediaType := range supportedMediaTypes {
+		if strings.Contains(normalized, mediaType) {
+			return mediaType
+		}
+	}
+	return ""
 }
