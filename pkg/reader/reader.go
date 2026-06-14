@@ -17,10 +17,11 @@ import (
 	"github.com/shouni/netarmor/securenet"
 )
 
-// UniversalReader はあらゆるURIからデータを読み取るインターフェース
+// UniversalReader は URI の種類に応じて読み取りストリームを返します。
 type UniversalReader struct {
 	mu            sync.Mutex
 	extractor     ports.Extractor
+	httpClient    HTTPClient
 	safeURL       safeURLFunc
 	newGCSFactory storageFactoryFunc
 	newS3Factory  storageFactoryFunc
@@ -28,12 +29,7 @@ type UniversalReader struct {
 	s3            storageReaderCache
 }
 
-type storageReaderCache struct {
-	reader remoteio.Reader
-	closer io.Closer
-}
-
-// New はUniversalReaderの新しいインスタンスを生成します。
+// New は UniversalReader の新しいインスタンスを生成します。
 func New(opts ...Option) (*UniversalReader, error) {
 	cfg := options{
 		safeURL:       securenet.IsSafeURL,
@@ -44,9 +40,15 @@ func New(opts ...Option) (*UniversalReader, error) {
 		opt(&cfg)
 	}
 
+	if cfg.httpClient == nil {
+		cfg.httpClient = httpkit.New(httpkit.DefaultHTTPTimeout)
+	}
 	if cfg.extractor == nil {
-		httpClient := httpkit.New(httpkit.DefaultHTTPTimeout)
-		extractor, err := extract.NewExtractor(httpClient)
+		fetcher, ok := cfg.httpClient.(ports.Fetcher)
+		if !ok {
+			return nil, fmt.Errorf("Extractorの初期化エラー: HTTP client must implement FetchBytes")
+		}
+		extractor, err := extract.NewExtractor(fetcher)
 		if err != nil {
 			return nil, fmt.Errorf("Extractorの初期化エラー: %w", err)
 		}
@@ -64,13 +66,14 @@ func New(opts ...Option) (*UniversalReader, error) {
 
 	return &UniversalReader{
 		extractor:     cfg.extractor,
+		httpClient:    cfg.httpClient,
 		safeURL:       cfg.safeURL,
 		newGCSFactory: cfg.newGCSFactory,
 		newS3Factory:  cfg.newS3Factory,
 	}, nil
 }
 
-// Open は URI のスキームを判別し、適切なリーダーを返します
+// Open は URI のスキームを判別し、適切な読み取りストリームを返します。
 func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("context is required")
@@ -98,33 +101,6 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 	return nil, fmt.Errorf("適切なリーダーが初期化されていません: %s", uri)
 }
 
-// openHTTP は HTTP(S) URI から本文テキストを抽出し、読み取りストリームとして返します。
-func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadCloser, error) {
-	text, hasBody, err := r.extractor.FetchAndExtractText(ctx, uri)
-	if err != nil {
-		return nil, err
-	}
-	if !hasBody {
-		return nil, fmt.Errorf("コンテンツが見つかりませんでした: %s", uri)
-	}
-
-	return io.NopCloser(strings.NewReader(text)), nil
-}
-
-// openStorage は指定されたストレージリーダーを取得し、URI の読み取りストリームを返します。
-func (r *UniversalReader) openStorage(
-	ctx context.Context,
-	uri string,
-	getReader func(context.Context) (remoteio.Reader, error),
-) (io.ReadCloser, error) {
-	reader, err := getReader(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return reader.Open(ctx, uri)
-}
-
 // Close は内部で保持している外部リソースを解放します。
 func (r *UniversalReader) Close() error {
 	if r == nil {
@@ -142,76 +118,4 @@ func (r *UniversalReader) Close() error {
 	}
 
 	return errors.Join(errs...)
-}
-
-// getGCSReader は、ストレージリーダーの生成とクロージャの管理
-func (r *UniversalReader) getGCSReader(ctx context.Context) (remoteio.Reader, error) {
-	return r.getStorageReader(ctx, &r.gcs, r.newGCSFactory, "GCS")
-}
-
-// getS3Reader は、S3リーダーの取得と管理
-func (r *UniversalReader) getS3Reader(ctx context.Context) (remoteio.Reader, error) {
-	return r.getStorageReader(ctx, &r.s3, r.newS3Factory, "S3")
-}
-
-// getStorageReader はストレージリーダーを遅延初期化し、以後の呼び出しで再利用します。
-func (r *UniversalReader) getStorageReader(
-	ctx context.Context,
-	cache *storageReaderCache,
-	newFactory storageFactoryFunc,
-	label string,
-) (remoteio.Reader, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if cache.reader != nil {
-		return cache.reader, nil
-	}
-
-	reader, closer, err := newStorageReader(ctx, newFactory)
-	if err != nil {
-		return nil, fmt.Errorf("%sリーダーの生成に失敗: %w", label, err)
-	}
-	cache.reader = reader
-	cache.closer = closer
-
-	return cache.reader, nil
-}
-
-// newStorageReader は、ストレージリーダーの生成とクロージャの管理
-func newStorageReader(
-	ctx context.Context,
-	newFactory func(context.Context) (remoteio.IOFactory, error),
-) (remoteio.Reader, io.Closer, error) {
-	factory, err := newFactory(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("ストレージファクトリの生成に失敗: %w", err)
-	}
-
-	reader, err := factory.InputReader()
-	if err != nil {
-		_ = factory.Close()
-		return nil, nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
-	}
-
-	if reader == nil {
-		_ = factory.Close()
-		return nil, nil, fmt.Errorf("リーダーの生成に失敗: reader is nil")
-	}
-
-	return reader, factory, nil
-}
-
-// close は保持しているクローザーを閉じ、キャッシュ済みリーダーを解放します。
-func (c *storageReaderCache) close() error {
-	if c.closer == nil {
-		c.reader = nil
-		return nil
-	}
-
-	err := c.closer.Close()
-	c.reader = nil
-	c.closer = nil
-
-	return err
 }
