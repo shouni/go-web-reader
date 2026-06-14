@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -14,15 +15,59 @@ import (
 // --- Stubs ---
 
 type stubExtractor struct {
-	text    string
-	hasBody bool
-	err     error
-	lastURL string
+	text          string
+	hasBody       bool
+	err           error
+	lastURL       string
+	extractedBody string
+	fetchCalls    int
+	extractCalls  int
 }
 
 func (s *stubExtractor) FetchAndExtractText(_ context.Context, url string) (string, bool, error) {
 	s.lastURL = url
+	s.fetchCalls++
 	return s.text, s.hasBody, s.err
+}
+
+func (s *stubExtractor) ExtractText(_ context.Context, reader io.Reader) (string, bool, error) {
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return "", false, err
+	}
+	s.extractedBody = string(body)
+	s.extractCalls++
+	return s.text, s.hasBody, s.err
+}
+
+type stubHTTPClient struct {
+	contentType string
+	body        string
+	statusCode  int
+	err         error
+	lastReq     *http.Request
+	calls       int
+}
+
+func (s *stubHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	s.lastReq = req
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	statusCode := s.statusCode
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+	resp := &http.Response{
+		StatusCode: statusCode,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(s.body)),
+	}
+	if s.contentType != "" {
+		resp.Header.Set("Content-Type", s.contentType)
+	}
+	return resp, nil
 }
 
 // remoteio.InputReader を満足させるスタブ
@@ -84,7 +129,8 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 	t.Parallel()
 
 	extractor := &stubExtractor{text: "hello world", hasBody: true}
-	r := newTestReader(t, extractor)
+	httpClient := &stubHTTPClient{contentType: "text/html; charset=utf-8", body: "<html></html>"}
+	r := newTestReader(t, extractor, WithHTTPClient(httpClient))
 
 	stream, err := r.Open(context.Background(), "https://example.com/article")
 	if err != nil {
@@ -99,15 +145,90 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 	if got := string(body); got != "hello world" {
 		t.Fatalf("body = %q, want %q", got, "hello world")
 	}
-	if extractor.lastURL != "https://example.com/article" {
-		t.Fatalf("extractor.lastURL = %q", extractor.lastURL)
+	if extractor.fetchCalls != 0 {
+		t.Fatalf("extractor.fetchCalls = %d, want 0", extractor.fetchCalls)
+	}
+	if extractor.extractCalls != 1 {
+		t.Fatalf("extractor.extractCalls = %d, want 1", extractor.extractCalls)
+	}
+	if extractor.extractedBody != "<html></html>" {
+		t.Fatalf("extractor.extractedBody = %q", extractor.extractedBody)
+	}
+	if httpClient.calls != 1 {
+		t.Fatalf("httpClient.calls = %d, want 1", httpClient.calls)
+	}
+}
+
+func TestNewAcceptsDoOnlyHTTPClientWithDefaultExtractor(t *testing.T) {
+	t.Parallel()
+
+	r, err := New(
+		WithHTTPClient(&stubHTTPClient{}),
+		WithSafeURLValidator(func(string) (bool, error) { return true, nil }),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if r == nil {
+		t.Fatal("New() reader = nil")
+	}
+}
+
+func TestReadHTTPFallsBackForMalformedContentType(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "fallback text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: `text/html; charset="`,
+		body:        "<html>fallback</html>",
+	}))
+
+	stream, err := r.Open(context.Background(), "https://example.com/malformed-content-type")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "fallback text" {
+		t.Fatalf("body = %q, want %q", got, "fallback text")
+	}
+	if extractor.extractCalls != 1 {
+		t.Fatalf("extractor.extractCalls = %d, want 1", extractor.extractCalls)
+	}
+}
+
+func TestReadHTTPMalformedContentTypeDoesNotFallbackOnPartialMatch(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "unexpected", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: `text/html-sandboxed; charset="`,
+		body:        "<html>unexpected</html>",
+	}))
+
+	_, err := r.Open(context.Background(), "https://example.com/bad-content-type")
+	if err == nil {
+		t.Fatal("Open() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "Content-Typeの解析に失敗しました") {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
 	}
 }
 
 func TestReadHTTPNoBodyReturnsError(t *testing.T) {
 	t.Parallel()
 
-	r := newTestReader(t, &stubExtractor{hasBody: false})
+	r := newTestReader(t,
+		&stubExtractor{hasBody: false},
+		WithHTTPClient(&stubHTTPClient{contentType: "application/xhtml+xml"}),
+	)
 
 	_, err := r.Open(context.Background(), "https://example.com/empty")
 	if err == nil {
@@ -115,6 +236,81 @@ func TestReadHTTPNoBodyReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "コンテンツが見つかりませんでした") {
 		t.Fatalf("Open() error = %v", err)
+	}
+}
+
+func TestReadHTTPPlainTextReturnsBodyWithoutExtractor(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "html text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: "text/plain; charset=utf-8",
+		body:        "plain body",
+	}))
+
+	stream, err := r.Open(context.Background(), "https://example.com/plain.txt")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "plain body" {
+		t.Fatalf("body = %q, want %q", got, "plain body")
+	}
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	}
+}
+
+func TestReadHTTPMarkdownReturnsBodyWithoutExtractor(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "html text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: "text/markdown; charset=utf-8",
+		body:        "# Title\n\nmarkdown body",
+	}))
+
+	stream, err := r.Open(context.Background(), "https://example.com/README.md")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "# Title\n\nmarkdown body" {
+		t.Fatalf("body = %q", got)
+	}
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	}
+}
+
+func TestReadHTTPUnsupportedContentTypeReturnsError(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "html text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: "application/json",
+		body:        `{"message":"nope"}`,
+	}))
+
+	_, err := r.Open(context.Background(), "https://example.com/data.json")
+	if err == nil {
+		t.Fatal("Open() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "未対応のContent-Type") {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
 	}
 }
 

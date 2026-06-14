@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/shouni/go-remote-io/remoteio"
 	"github.com/shouni/go-web-exact/v2/ports"
@@ -10,8 +11,14 @@ import (
 type safeURLFunc func(string) (bool, error)
 type storageFactoryFunc func(context.Context) (remoteio.IOFactory, error)
 
+// HTTPClient は HTTP リクエストを実行する最小インターフェースです。
+type HTTPClient interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 type options struct {
 	extractor     ports.Extractor
+	httpClient    HTTPClient
 	safeURL       safeURLFunc
 	newGCSFactory storageFactoryFunc
 	newS3Factory  storageFactoryFunc
@@ -24,6 +31,13 @@ type Option func(*options)
 func WithExtractor(extractor ports.Extractor) Option {
 	return func(o *options) {
 		o.extractor = extractor
+	}
+}
+
+// WithHTTPClient は HTTP(S) の取得に使うクライアントを差し替えます。
+func WithHTTPClient(client HTTPClient) Option {
+	return func(o *options) {
+		o.httpClient = client
 	}
 }
 

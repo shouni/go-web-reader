@@ -5,7 +5,6 @@ import (
 
 	"github.com/shouni/go-web-reader/internal/app"
 	"github.com/shouni/go-web-reader/internal/config"
-	"github.com/shouni/go-web-reader/internal/pipeline"
 	pkgreader "github.com/shouni/go-web-reader/pkg/reader"
 )
 
@@ -33,7 +32,7 @@ func BuildContainer(cfg *config.Config) (container *app.Container, err error) {
 	appCtx.Closers = append(appCtx.Closers, reader)
 
 	// 2. Pipeline の構築
-	p, err := pipeline.NewPipeline(cfg.SourceURL, reader)
+	p, err := buildPipeline(cfg, reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build pipeline: %w", err)
 	}
