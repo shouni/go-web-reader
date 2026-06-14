@@ -124,7 +124,7 @@ func read(ctx context.Context, uri string) error {
 ## 🔧 実装メモ (Implementation Notes)
 
 * `pkg/reader.New()` は軽量な初期化だけを行い、実際の GCS/S3 クライアント生成は `Open(ctx, uri)` の呼び出し時に遅延実行されます。
-* HTTP(S) URI はまず `Content-Type` を判定し、HTML/XHTML は本文抽出、plain text/Markdown は生テキストのまま返します。その他の media type は未対応エラーになります。
+* HTTP(S) URI はまず `Content-Type` を判定し、HTML/XHTML は取得済みレスポンスボディから本文抽出、plain text/Markdown は生テキストのまま返します。その他の media type は未対応エラーになります。
 * `pkg/reader` は GCS/S3 の reader と closer を内部キャッシュとして保持し、初回アクセス後は同じクライアントを再利用します。
 * `internal/pipeline` は具体実装に直接依存せず、`ContentReader` インターフェースを通して入力を読み込みます。`ContentReader` は読み取り責務だけを持ち、リソース解放は `internal/app.Container` が管理します。
 * `internal/app.Container.Close()` は複数の close エラーを `errors.Join` でまとめて返します。

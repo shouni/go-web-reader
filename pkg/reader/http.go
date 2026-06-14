@@ -26,8 +26,7 @@ func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadClos
 
 	switch contentType {
 	case "text/html", "application/xhtml+xml":
-		_ = resp.Body.Close()
-		return r.openExtractedHTML(ctx, uri)
+		return r.openExtractedHTML(ctx, uri, resp.Body)
 	case "text/plain", "text/markdown", "text/x-markdown":
 		return resp.Body, nil
 	default:
@@ -66,9 +65,11 @@ func (r *UniversalReader) fetchHTTP(ctx context.Context, uri string) (*http.Resp
 	return resp, nil
 }
 
-// openExtractedHTML は HTML から本文テキストを抽出して読み取りストリームを返します。
-func (r *UniversalReader) openExtractedHTML(ctx context.Context, uri string) (io.ReadCloser, error) {
-	text, hasBody, err := r.extractor.FetchAndExtractText(ctx, uri)
+// openExtractedHTML は取得済み HTML から本文テキストを抽出して読み取りストリームを返します。
+func (r *UniversalReader) openExtractedHTML(ctx context.Context, uri string, body io.ReadCloser) (io.ReadCloser, error) {
+	defer body.Close()
+
+	text, hasBody, err := r.extractor.ExtractText(ctx, body)
 	if err != nil {
 		return nil, err
 	}

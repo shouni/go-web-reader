@@ -15,16 +15,28 @@ import (
 // --- Stubs ---
 
 type stubExtractor struct {
-	text    string
-	hasBody bool
-	err     error
-	lastURL string
-	calls   int
+	text          string
+	hasBody       bool
+	err           error
+	lastURL       string
+	extractedBody string
+	fetchCalls    int
+	extractCalls  int
 }
 
 func (s *stubExtractor) FetchAndExtractText(_ context.Context, url string) (string, bool, error) {
 	s.lastURL = url
-	s.calls++
+	s.fetchCalls++
+	return s.text, s.hasBody, s.err
+}
+
+func (s *stubExtractor) ExtractText(_ context.Context, reader io.Reader) (string, bool, error) {
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return "", false, err
+	}
+	s.extractedBody = string(body)
+	s.extractCalls++
 	return s.text, s.hasBody, s.err
 }
 
@@ -133,11 +145,14 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 	if got := string(body); got != "hello world" {
 		t.Fatalf("body = %q, want %q", got, "hello world")
 	}
-	if extractor.lastURL != "https://example.com/article" {
-		t.Fatalf("extractor.lastURL = %q", extractor.lastURL)
+	if extractor.fetchCalls != 0 {
+		t.Fatalf("extractor.fetchCalls = %d, want 0", extractor.fetchCalls)
 	}
-	if extractor.calls != 1 {
-		t.Fatalf("extractor.calls = %d, want 1", extractor.calls)
+	if extractor.extractCalls != 1 {
+		t.Fatalf("extractor.extractCalls = %d, want 1", extractor.extractCalls)
+	}
+	if extractor.extractedBody != "<html></html>" {
+		t.Fatalf("extractor.extractedBody = %q", extractor.extractedBody)
 	}
 	if httpClient.calls != 1 {
 		t.Fatalf("httpClient.calls = %d, want 1", httpClient.calls)
@@ -183,8 +198,8 @@ func TestReadHTTPPlainTextReturnsBodyWithoutExtractor(t *testing.T) {
 	if got := string(body); got != "plain body" {
 		t.Fatalf("body = %q, want %q", got, "plain body")
 	}
-	if extractor.calls != 0 {
-		t.Fatalf("extractor.calls = %d, want 0", extractor.calls)
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
 	}
 }
 
@@ -210,8 +225,8 @@ func TestReadHTTPMarkdownReturnsBodyWithoutExtractor(t *testing.T) {
 	if got := string(body); got != "# Title\n\nmarkdown body" {
 		t.Fatalf("body = %q", got)
 	}
-	if extractor.calls != 0 {
-		t.Fatalf("extractor.calls = %d, want 0", extractor.calls)
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
 	}
 }
 
@@ -231,8 +246,8 @@ func TestReadHTTPUnsupportedContentTypeReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "未対応のContent-Type") {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if extractor.calls != 0 {
-		t.Fatalf("extractor.calls = %d, want 0", extractor.calls)
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
 	}
 }
 
