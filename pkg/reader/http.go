@@ -34,6 +34,9 @@ func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, 
 	if err != nil {
 		return nil, fmt.Errorf("HTTPリクエスト失敗: %w", err)
 	}
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 
 	return httpkit.HandleResponse(resp)
 }
@@ -129,14 +132,15 @@ func mediaType(contentType string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.ToLower(mediaType), nil
+	return mediaType, nil
 }
 
 // fallbackMediaType は不正な Content-Type ヘッダーから既知の media type を推定します。
 func fallbackMediaType(contentType string) string {
-	normalized := strings.ToLower(contentType)
+	parts := strings.SplitN(contentType, ";", 2)
+	normalized := strings.TrimSpace(strings.ToLower(parts[0]))
 	for _, mediaType := range supportedMediaTypes {
-		if strings.Contains(normalized, mediaType) {
+		if normalized == mediaType {
 			return mediaType
 		}
 	}

@@ -201,6 +201,27 @@ func TestReadHTTPFallsBackForMalformedContentType(t *testing.T) {
 	}
 }
 
+func TestReadHTTPMalformedContentTypeDoesNotFallbackOnPartialMatch(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "unexpected", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: `text/html-sandboxed; charset="`,
+		body:        "<html>unexpected</html>",
+	}))
+
+	_, err := r.Open(context.Background(), "https://example.com/bad-content-type")
+	if err == nil {
+		t.Fatal("Open() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "Content-Typeの解析に失敗しました") {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	}
+}
+
 func TestReadHTTPNoBodyReturnsError(t *testing.T) {
 	t.Parallel()
 
