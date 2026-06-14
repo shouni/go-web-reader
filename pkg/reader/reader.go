@@ -88,29 +88,41 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 
 	switch {
 	case strings.HasPrefix(uri, securenet.SchemeHTTP), strings.HasPrefix(uri, securenet.SchemeHTTPS):
-		text, hasBody, err := r.extractor.FetchAndExtractText(ctx, uri)
-		if err != nil {
-			return nil, err
-		}
-		if !hasBody {
-			return nil, fmt.Errorf("コンテンツが見つかりませんでした: %s", uri)
-		}
-		return io.NopCloser(strings.NewReader(text)), nil
+		return r.openHTTP(ctx, uri)
 	case remoteio.IsGCSURI(uri):
-		reader, err := r.getGCSReader(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return reader.Open(ctx, uri)
+		return r.openStorage(ctx, uri, r.getGCSReader)
 	case remoteio.IsS3URI(uri):
-		reader, err := r.getS3Reader(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return reader.Open(ctx, uri)
+		return r.openStorage(ctx, uri, r.getS3Reader)
 	}
 
 	return nil, fmt.Errorf("適切なリーダーが初期化されていません: %s", uri)
+}
+
+// openHTTP は HTTP(S) URI から本文テキストを抽出し、読み取りストリームとして返します。
+func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadCloser, error) {
+	text, hasBody, err := r.extractor.FetchAndExtractText(ctx, uri)
+	if err != nil {
+		return nil, err
+	}
+	if !hasBody {
+		return nil, fmt.Errorf("コンテンツが見つかりませんでした: %s", uri)
+	}
+
+	return io.NopCloser(strings.NewReader(text)), nil
+}
+
+// openStorage は指定されたストレージリーダーを取得し、URI の読み取りストリームを返します。
+func (r *UniversalReader) openStorage(
+	ctx context.Context,
+	uri string,
+	getReader func(context.Context) (remoteio.Reader, error),
+) (io.ReadCloser, error) {
+	reader, err := getReader(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return reader.Open(ctx, uri)
 }
 
 // Close は内部で保持している外部リソースを解放します。
@@ -142,6 +154,7 @@ func (r *UniversalReader) getS3Reader(ctx context.Context) (remoteio.Reader, err
 	return r.getStorageReader(ctx, &r.s3, r.newS3Factory, "S3")
 }
 
+// getStorageReader はストレージリーダーを遅延初期化し、以後の呼び出しで再利用します。
 func (r *UniversalReader) getStorageReader(
 	ctx context.Context,
 	cache *storageReaderCache,
@@ -189,6 +202,7 @@ func newStorageReader(
 	return reader, factory, nil
 }
 
+// close は保持しているクローザーを閉じ、キャッシュ済みリーダーを解放します。
 func (c *storageReaderCache) close() error {
 	if c.closer == nil {
 		c.reader = nil

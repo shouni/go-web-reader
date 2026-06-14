@@ -18,12 +18,13 @@ func addAppPersistentFlags(rootCmd *cobra.Command) {
 	rootCmd.PersistentFlags().StringVarP(&opts.SourceURL, "uri", "u", "", "入力URL")
 }
 
-// initAppPreRunE は HTTP クライアントの初期化とコンテキストへの格納を行います。
+// initAppPreRunE は設定値を正規化し、必須項目を検証します。
 func initAppPreRunE(cmd *cobra.Command, args []string) error {
 	opts.Normalize()
 	return opts.Validate()
 }
 
+// Execute はルートコマンドを構築し、CLI アプリケーションを実行します。
 func Execute() {
 	opts = &config.Config{}
 
