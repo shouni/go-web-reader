@@ -103,7 +103,16 @@ func newHTTPRequest(ctx context.Context, uri string) (*http.Request, error) {
 		return nil, fmt.Errorf("HTTPリクエスト作成失敗: %w", err)
 	}
 	req.Header.Set("User-Agent", httpkit.UserAgent)
-	req.Header.Set("Accept", strings.Join(supportedMediaTypes, ", "))
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+	req.Header.Set("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
+	req.Header.Set("sec-ch-ua", `"Google Chrome";v="136", "Not A(Brand";v="99", "Chromium";v="136"`)
+	req.Header.Set("sec-ch-ua-mobile", "?0")
+	req.Header.Set("sec-ch-ua-platform", `"Windows"`)
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
+	req.Header.Set("Sec-Fetch-User", "?1")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
 
 	return req, nil
 }
