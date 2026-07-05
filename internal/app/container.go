@@ -1,9 +1,10 @@
+// Package app は、アプリケーションの依存関係を組み立てて保持する DI コンテナを提供します。
 package app
 
 import (
-	"errors"
 	"io"
 
+	"github.com/shouni/go-web-reader/internal/closeutil"
 	"github.com/shouni/go-web-reader/internal/config"
 	"github.com/shouni/go-web-reader/internal/domain"
 )
@@ -22,14 +23,12 @@ func (c *Container) Close() error {
 		return nil
 	}
 
-	var errs []error
+	fns := make([]func() error, 0, len(c.Closers))
 	for _, closer := range c.Closers {
 		if closer != nil {
-			if err := closer.Close(); err != nil {
-				errs = append(errs, err)
-			}
+			fns = append(fns, closer.Close)
 		}
 	}
 
-	return errors.Join(errs...)
+	return closeutil.Join(fns...)
 }

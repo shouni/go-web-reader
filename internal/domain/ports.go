@@ -1,3 +1,4 @@
+// Package domain は、アプリケーションのコアロジックが依存するインターフェース（ポート）を定義します。
 package domain
 
 import "context"

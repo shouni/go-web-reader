@@ -1,3 +1,5 @@
+// Package config は、コマンドライン引数からアプリケーション設定を保持・正規化・検証するための
+// 共通データモデルを提供します。
 package config
 
 import (

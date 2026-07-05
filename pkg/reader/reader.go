@@ -1,8 +1,9 @@
+// Package reader は、HTTP/HTTPS や GCS/S3 など URI の種類を問わず
+// コンテンツを読み込み、必要に応じて内容を抽出するユニバーサルリーダーを提供します。
 package reader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/shouni/go-remote-io/remoteio/s3"
 	"github.com/shouni/go-web-exact/v2/extract"
 	"github.com/shouni/go-web-exact/v2/ports"
+	"github.com/shouni/go-web-reader/internal/closeutil"
 	"github.com/shouni/netarmor/securenet"
 )
 
@@ -46,7 +48,7 @@ func New(opts ...Option) (*UniversalReader, error) {
 	if cfg.extractor == nil {
 		extractor, err := extract.NewExtractor(httpClientFetcher{client: cfg.httpClient})
 		if err != nil {
-			return nil, fmt.Errorf("Extractorの初期化エラー: %w", err)
+			return nil, fmt.Errorf("extractorの初期化エラー: %w", err)
 		}
 		cfg.extractor = extractor
 	}
@@ -106,12 +108,5 @@ func (r *UniversalReader) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var errs []error
-	for _, cache := range []*storageReaderCache{&r.gcs, &r.s3} {
-		if err := cache.close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	return errors.Join(errs...)
+	return closeutil.Join(r.gcs.close, r.s3.close)
 }
