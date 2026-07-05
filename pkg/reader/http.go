@@ -34,10 +34,9 @@ func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, 
 	if err != nil {
 		return nil, fmt.Errorf("HTTPリクエスト失敗: %w", err)
 	}
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
 
+	// resp.Body の nil チェックと Close は HandleResponse が内部で行うため、ここでは行わない
+	// （二重 Close を避けるため）。
 	return httpkit.HandleResponse(resp)
 }
 
@@ -148,9 +147,9 @@ func mediaType(contentType string) (string, error) {
 func fallbackMediaType(contentType string) string {
 	parts := strings.SplitN(contentType, ";", 2)
 	normalized := strings.TrimSpace(strings.ToLower(parts[0]))
-	for _, mediaType := range supportedMediaTypes {
-		if normalized == mediaType {
-			return mediaType
+	for _, candidate := range supportedMediaTypes {
+		if normalized == candidate {
+			return candidate
 		}
 	}
 	return ""

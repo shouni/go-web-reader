@@ -4,7 +4,6 @@ package reader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/shouni/go-remote-io/remoteio/s3"
 	"github.com/shouni/go-web-exact/v2/extract"
 	"github.com/shouni/go-web-exact/v2/ports"
+	"github.com/shouni/go-web-reader/internal/closeutil"
 	"github.com/shouni/netarmor/securenet"
 )
 
@@ -108,12 +108,5 @@ func (r *UniversalReader) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var errs []error
-	for _, cache := range []*storageReaderCache{&r.gcs, &r.s3} {
-		if err := cache.close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	return errors.Join(errs...)
+	return closeutil.Join(r.gcs.close, r.s3.close)
 }
