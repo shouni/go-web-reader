@@ -1,3 +1,5 @@
+// Package builder は、設定値から外部サービスへの接続を確立し、
+// アプリケーションの依存関係一式（app.Container）を組み立てます。
 package builder
 
 import (

@@ -1,3 +1,4 @@
+// Package cmd は、go-web-reader CLI のサブコマンドとその実行ロジックを定義します。
 package cmd
 
 import (
@@ -23,7 +24,7 @@ var readCmd = &cobra.Command{
 // --------------------------------------------------------------------------
 
 // readCommand は、指定されたURIからコンテキストを取得し、その結果を標準出力に直接表示します。
-func readCommand(cmd *cobra.Command, args []string) error {
+func readCommand(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	appCtx, err := builder.BuildContainer(opts)
 	if err != nil {

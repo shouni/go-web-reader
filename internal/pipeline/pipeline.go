@@ -1,3 +1,4 @@
+// Package pipeline は、URIからのコンテンツ取得と抽出処理を実行するパイプラインを提供します。
 package pipeline
 
 import (

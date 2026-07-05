@@ -19,7 +19,7 @@ func addAppPersistentFlags(rootCmd *cobra.Command) {
 }
 
 // initAppPreRunE は設定値を正規化し、必須項目を検証します。
-func initAppPreRunE(cmd *cobra.Command, args []string) error {
+func initAppPreRunE(_ *cobra.Command, _ []string) error {
 	opts.Normalize()
 	return opts.Validate()
 }

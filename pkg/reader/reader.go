@@ -1,3 +1,5 @@
+// Package reader は、HTTP/HTTPS や GCS/S3 など URI の種類を問わず
+// コンテンツを読み込み、必要に応じて内容を抽出するユニバーサルリーダーを提供します。
 package reader
 
 import (
@@ -46,7 +48,7 @@ func New(opts ...Option) (*UniversalReader, error) {
 	if cfg.extractor == nil {
 		extractor, err := extract.NewExtractor(httpClientFetcher{client: cfg.httpClient})
 		if err != nil {
-			return nil, fmt.Errorf("Extractorの初期化エラー: %w", err)
+			return nil, fmt.Errorf("extractorの初期化エラー: %w", err)
 		}
 		cfg.extractor = extractor
 	}
