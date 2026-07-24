@@ -293,6 +293,33 @@ func TestReadHTTPMarkdownReturnsBodyWithoutExtractor(t *testing.T) {
 	}
 }
 
+func TestReadHTTPImageReturnsBodyWithoutExtractor(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "html text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: "image/png",
+		body:        "fake-png-bytes",
+	}))
+
+	stream, err := r.Open(context.Background(), "https://example.com/photo.png")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "fake-png-bytes" {
+		t.Fatalf("body = %q, want %q", got, "fake-png-bytes")
+	}
+	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
+		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	}
+}
+
 func TestReadHTTPUnsupportedContentTypeReturnsError(t *testing.T) {
 	t.Parallel()
 

@@ -21,9 +21,10 @@
 
 ### 🌐 [extract] ユニバーサル・コンテンツ抽出
 
-* **Unified Interface**: URL が指定された場合、HTTP レスポンスの `Content-Type` に応じて HTML 抽出またはテキスト読み取りを切り替えます。
+* **Unified Interface**: URL が指定された場合、HTTP レスポンスの `Content-Type` に応じて HTML 抽出・テキスト読み取り・バイナリ取得を切り替えます。
 * **HTML Extraction**: `text/html` と `application/xhtml+xml` では Web 抽出エンジンが起動し、ノイズ（広告・ナビゲーション）を除去した「本文のみ」をストリームとして返します。
 * **Plain Text / Markdown**: `text/plain`、`text/markdown`、`text/x-markdown` は変換せず、そのままストリームとして返します。
+* **Image / Binary Passthrough**: `image/*`(`image/png`、`image/jpeg` など任意のサブタイプ)は変換せず、生バイト列をそのままストリームとして返します。
 * **Safe URL Validation**: Web URL は取得前に安全性を検証し、検証エラーは呼び出し元で追跡できる形で返します。
 * **Heuristic Engine**: DOM 構造を解析し、文脈を維持したまま高精度にメインテキストを特定します。
 
@@ -124,7 +125,8 @@ func read(ctx context.Context, uri string) error {
 ## 🔧 実装メモ (Implementation Notes)
 
 * `pkg/reader.New()` は軽量な初期化だけを行い、実際の GCS/S3 クライアント生成は `Open(ctx, uri)` の呼び出し時に遅延実行されます。
-* HTTP(S) URI はまず `Content-Type` を判定し、HTML/XHTML は取得済みレスポンスボディから本文抽出、plain text/Markdown は生テキストのまま返します。その他の media type は未対応エラーになります。
+* HTTP(S) URI はまず `Content-Type` を判定し、HTML/XHTML は取得済みレスポンスボディから本文抽出、plain text/Markdown/`image/*` は生データのまま返します。その他の media type は未対応エラーになります。
+* HTTP(S) レスポンスボディの取得は `go-http-kit` の `FetchBytes`（`HandleResponse`）に一本化されており、Content-Type を問わず **25MB** の読み込み上限が適用されます。超過した場合はエラーになります。
 * `pkg/reader` は GCS/S3 の reader と closer を内部キャッシュとして保持し、初回アクセス後は同じクライアントを再利用します。
 * `internal/pipeline` は具体実装に直接依存せず、`ContentReader` インターフェースを通して入力を読み込みます。`ContentReader` は読み取り責務だけを持ち、リソース解放は `internal/app.Container` が管理します。
 * `internal/app.Container.Close()` は複数の close エラーを `errors.Join` でまとめて返します。
