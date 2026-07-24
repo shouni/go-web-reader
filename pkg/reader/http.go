@@ -24,20 +24,23 @@ type httpClientFetcher struct {
 }
 
 // FetchBytes は HTTPClient を go-web-exact の ports.Fetcher として使うためのアダプタです。
-func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, error) {
+func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, string, error) {
 	req, err := newHTTPRequest(ctx, uri)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("HTTPリクエスト失敗: %w", err)
+		return nil, "", fmt.Errorf("HTTPリクエスト失敗: %w", err)
 	}
+
+	contentType := resp.Header.Get("Content-Type")
 
 	// resp.Body の nil チェックと Close は HandleResponse が内部で行うため、ここでは行わない
 	// （二重 Close を避けるため）。
-	return httpkit.HandleResponse(resp)
+	body, err := httpkit.HandleResponse(resp)
+	return body, contentType, err
 }
 
 // openHTTP は HTTP(S) URI を Content-Type ごとに処理して読み取りストリームを返します。
