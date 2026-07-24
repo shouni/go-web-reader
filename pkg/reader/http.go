@@ -61,10 +61,12 @@ func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadClos
 		}
 	}
 
-	switch contentType {
-	case "text/html", "application/xhtml+xml":
+	switch {
+	case contentType == "text/html", contentType == "application/xhtml+xml":
 		return r.openExtractedHTML(ctx, uri, io.NopCloser(bytes.NewReader(body)))
-	case "text/plain", "text/markdown", "text/x-markdown":
+	case contentType == "text/plain", contentType == "text/markdown", contentType == "text/x-markdown":
+		return io.NopCloser(bytes.NewReader(body)), nil
+	case strings.HasPrefix(contentType, "image/"):
 		return io.NopCloser(bytes.NewReader(body)), nil
 	default:
 		if contentType == "" {
@@ -126,6 +128,9 @@ func mediaType(contentType string) (string, error) {
 func fallbackMediaType(contentType string) string {
 	parts := strings.SplitN(contentType, ";", 2)
 	normalized := strings.TrimSpace(strings.ToLower(parts[0]))
+	if strings.HasPrefix(normalized, "image/") {
+		return normalized
+	}
 	for _, candidate := range supportedMediaTypes {
 		if normalized == candidate {
 			return candidate
