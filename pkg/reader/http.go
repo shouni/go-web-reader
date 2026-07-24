@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -24,75 +25,53 @@ type httpClientFetcher struct {
 }
 
 // FetchBytes は HTTPClient を go-web-exact の ports.Fetcher として使うためのアダプタです。
-func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, error) {
+func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, string, error) {
 	req, err := newHTTPRequest(ctx, uri)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("HTTPリクエスト失敗: %w", err)
+		return nil, "", fmt.Errorf("HTTPリクエスト失敗: %w", err)
 	}
+
+	contentType := resp.Header.Get("Content-Type")
 
 	// resp.Body の nil チェックと Close は HandleResponse が内部で行うため、ここでは行わない
 	// （二重 Close を避けるため）。
-	return httpkit.HandleResponse(resp)
+	body, err := httpkit.HandleResponse(resp)
+	return body, contentType, err
 }
 
 // openHTTP は HTTP(S) URI を Content-Type ごとに処理して読み取りストリームを返します。
+// フェッチは httpClientFetcher.FetchBytes に一本化しており、レスポンスサイズの上限
+// （httpkit.HandleResponse による）がHTML以外のコンテンツタイプにも一貫して適用されます。
 func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadCloser, error) {
-	resp, err := r.fetchHTTP(ctx, uri)
+	body, rawContentType, err := (httpClientFetcher{client: r.httpClient}).FetchBytes(ctx, uri)
 	if err != nil {
 		return nil, err
 	}
 
-	rawContentType := resp.Header.Get("Content-Type")
 	contentType, err := mediaType(rawContentType)
 	if err != nil {
 		contentType = fallbackMediaType(rawContentType)
 		if contentType == "" {
-			_ = resp.Body.Close()
 			return nil, fmt.Errorf("Content-Typeの解析に失敗しました: %w", err)
 		}
 	}
 
 	switch contentType {
 	case "text/html", "application/xhtml+xml":
-		return r.openExtractedHTML(ctx, uri, resp.Body)
+		return r.openExtractedHTML(ctx, uri, io.NopCloser(bytes.NewReader(body)))
 	case "text/plain", "text/markdown", "text/x-markdown":
-		return resp.Body, nil
+		return io.NopCloser(bytes.NewReader(body)), nil
 	default:
-		_ = resp.Body.Close()
 		if contentType == "" {
 			return nil, fmt.Errorf("未対応のContent-Typeです: %s", uri)
 		}
 		return nil, fmt.Errorf("未対応のContent-Typeです: %s (%s)", uri, contentType)
 	}
-}
-
-// fetchHTTP は HTTP GET を実行し、成功レスポンスを返します。
-func (r *UniversalReader) fetchHTTP(ctx context.Context, uri string) (*http.Response, error) {
-	req, err := newHTTPRequest(ctx, uri)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := r.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("HTTPリクエスト失敗: %w", err)
-	}
-	if resp == nil {
-		return nil, fmt.Errorf("HTTPレスポンスがnilです")
-	}
-	if resp.Body == nil {
-		return nil, fmt.Errorf("HTTPレスポンスボディがnilです")
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("HTTPステータスエラー: %d", resp.StatusCode)
-	}
-
-	return resp, nil
 }
 
 // newHTTPRequest は reader 共通の HTTP GET リクエストを生成します。
