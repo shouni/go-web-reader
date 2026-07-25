@@ -164,7 +164,7 @@ func TestNewAcceptsDoOnlyHTTPClientWithDefaultExtractor(t *testing.T) {
 
 	r, err := New(
 		WithHTTPClient(&stubHTTPClient{}),
-		WithSafeURLValidator(func(string) (bool, error) { return true, nil }),
+		WithSafeURLValidator(func(context.Context, string) error { return nil }),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -403,8 +403,8 @@ func TestReadRejectsInvalidInput(t *testing.T) {
 	}{
 		{name: "nil context", ctx: nil, uri: "https://example.com"},
 		{name: "empty uri", ctx: context.Background(), uri: ""},
-		{name: "unsafe uri", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(string) (bool, error) { return false, nil })}},
-		{name: "safe checker error", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(string) (bool, error) { return false, safeCheckErr })}},
+		{name: "unsafe uri", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(context.Context, string) error { return errors.New("unsafe") })}},
+		{name: "safe checker error", ctx: context.Background(), uri: "https://example.com/private", opts: []Option{WithSafeURLValidator(func(context.Context, string) error { return safeCheckErr })}},
 	}
 
 	for _, tt := range tests {
@@ -424,8 +424,8 @@ func TestReadWrapsSafeCheckerError(t *testing.T) {
 	t.Parallel()
 
 	safeCheckErr := errors.New("lookup failed")
-	r := newTestReader(t, &stubExtractor{}, WithSafeURLValidator(func(string) (bool, error) {
-		return false, safeCheckErr
+	r := newTestReader(t, &stubExtractor{}, WithSafeURLValidator(func(context.Context, string) error {
+		return safeCheckErr
 	}))
 
 	_, err := r.Open(context.Background(), "https://example.com/private")
@@ -524,7 +524,7 @@ func newTestReader(t *testing.T, extractor ports.Extractor, opts ...Option) *Uni
 
 	baseOpts := []Option{
 		WithExtractor(extractor),
-		WithSafeURLValidator(func(string) (bool, error) { return true, nil }),
+		WithSafeURLValidator(func(context.Context, string) error { return nil }),
 	}
 	baseOpts = append(baseOpts, opts...)
 
