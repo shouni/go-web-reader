@@ -8,7 +8,9 @@ import (
 	"github.com/shouni/go-web-exact/v2/ports"
 )
 
-type safeURLFunc func(string) (bool, error)
+// safeURLFunc は URI の安全性を検証します。安全な場合は nil を返します。
+// 名前解決を伴うため context を受け取ります。
+type safeURLFunc func(context.Context, string) error
 type storageFactoryFunc func(context.Context) (remoteio.IOFactory, error)
 
 // HTTPClient は HTTP リクエストを実行する最小インターフェースです。

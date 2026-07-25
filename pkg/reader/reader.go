@@ -34,7 +34,11 @@ type UniversalReader struct {
 // New は UniversalReader の新しいインスタンスを生成します。
 func New(opts ...Option) (*UniversalReader, error) {
 	cfg := options{
-		safeURL:       securenet.IsSafeURL,
+		// securenet.ValidateURL は可変長オプションを取るため、そのままでは
+		// safeURLFunc に代入できない。既定ポリシーで呼ぶラッパを噛ませる。
+		safeURL: func(ctx context.Context, uri string) error {
+			return securenet.ValidateURL(ctx, uri)
+		},
 		newGCSFactory: func(ctx context.Context) (remoteio.IOFactory, error) { return gcs.New(ctx) },
 		newS3Factory:  func(ctx context.Context) (remoteio.IOFactory, error) { return s3.New(ctx) },
 	}
@@ -79,12 +83,8 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 	if uri == "" {
 		return nil, fmt.Errorf("uri cannot be empty")
 	}
-	ok, err := r.safeURL(uri)
-	if err != nil {
+	if err := r.safeURL(ctx, uri); err != nil {
 		return nil, fmt.Errorf("URL安全性検証に失敗しました: %w", err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("安全ではないURLです: %s", uri)
 	}
 
 	switch {
