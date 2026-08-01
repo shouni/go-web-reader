@@ -6,13 +6,25 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/shouni/go-remote-io/remoteio"
 	"github.com/shouni/go-web-exact/v2/ports"
 )
 
 // --- Stubs ---
+
+// 依存ライブラリ側のインターフェースが変わったとき、スタブの追従漏れを
+// テスト実行時ではなくビルド時に検出するためのアサーション。
+// （go-remote-io v1.7.0 の List への ListOption 追加のような変更を取りこぼさないため）
+var (
+	_ remoteio.InputReader = (*stubReader)(nil)
+	_ remoteio.IOFactory   = (*stubFactory)(nil)
+	_ ports.Extractor      = (*stubExtractor)(nil)
+	_ HTTPClient           = (*stubHTTPClient)(nil)
+)
 
 type stubExtractor struct {
 	text          string
@@ -86,8 +98,10 @@ func (s *stubReader) Open(_ context.Context, path string) (io.ReadCloser, error)
 }
 
 // Lister / Exister インターフェースの実装（必要に応じて）
-func (s *stubReader) List(_ context.Context, _ string, _ func(string) error) error { return nil }
-func (s *stubReader) Exists(_ context.Context, _ string) (bool, error)             { return true, nil }
+func (s *stubReader) List(_ context.Context, _ string, _ func(string) error, _ ...remoteio.ListOption) error {
+	return nil
+}
+func (s *stubReader) Exists(_ context.Context, _ string) (bool, error) { return true, nil }
 
 type stubCloser struct {
 	closed int
@@ -516,6 +530,222 @@ func TestNewStorageReaderClosesFactoryOnNilReader(t *testing.T) {
 	}
 	if factory.closeCalls != 1 {
 		t.Fatalf("factory.closeCalls = %d, want 1", factory.closeCalls)
+	}
+}
+
+func TestOpenRejectsUnsupportedScheme(t *testing.T) {
+	t.Parallel()
+
+	r := newTestReader(t, &stubExtractor{})
+
+	_, err := r.Open(context.Background(), "ftp://example.com/file.txt")
+	if err == nil {
+		t.Fatal("Open() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "未対応のURIスキームです") {
+		t.Fatalf("Open() error = %v", err)
+	}
+}
+
+// TestOpenStorageInitializesSchemesIndependently は、片方のスキームの初期化が
+// 滞っていても、もう片方が独立して開けることを確認します。初期化には認証情報の
+// 解決などの I/O が伴うため、ここを共有ロックにすると一方の遅延が他方を巻き込みます。
+func TestOpenStorageInitializesSchemesIndependently(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	gcsStarted := make(chan struct{})
+
+	r := newTestReader(t, &stubExtractor{},
+		WithGCSFactory(func(context.Context) (remoteio.IOFactory, error) {
+			close(gcsStarted)
+			<-release // GCS の初期化を意図的に滞留させる
+			return &stubFactory{reader: &stubReader{content: "gcs body"}}, nil
+		}),
+		WithS3Factory(func(context.Context) (remoteio.IOFactory, error) {
+			return &stubFactory{reader: &stubReader{content: "s3 body"}}, nil
+		}),
+	)
+
+	// 失敗時もテストが停止しないよう、滞留を解除してから Close する。
+	// t.Cleanup は LIFO なので、後から登録した解除処理が先に走る。
+	t.Cleanup(func() { _ = r.Close() })
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
+	go func() {
+		stream, err := r.Open(context.Background(), "gs://bucket/blocked.txt")
+		if err == nil {
+			_ = stream.Close()
+		}
+	}()
+
+	<-gcsStarted
+
+	type result struct {
+		body string
+		err  error
+	}
+	s3Done := make(chan result, 1)
+	go func() {
+		stream, err := r.Open(context.Background(), "s3://bucket/path.txt")
+		if err != nil {
+			s3Done <- result{err: err}
+			return
+		}
+		defer stream.Close()
+		body, err := io.ReadAll(stream)
+		s3Done <- result{body: string(body), err: err}
+	}()
+
+	select {
+	case got := <-s3Done:
+		if got.err != nil {
+			t.Fatalf("Open(s3) error = %v", got.err)
+		}
+		if got.body != "s3 body" {
+			t.Fatalf("body = %q, want %q", got.body, "s3 body")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("S3 の Open が GCS の初期化完了を待たされている")
+	}
+}
+
+func TestOpenStorageReusesCachedReader(t *testing.T) {
+	t.Parallel()
+
+	var factoryCalls int
+	r := newTestReader(t, &stubExtractor{},
+		WithGCSFactory(func(context.Context) (remoteio.IOFactory, error) {
+			factoryCalls++
+			return &stubFactory{reader: &stubReader{content: "gcs body"}}, nil
+		}),
+	)
+	defer func() { _ = r.Close() }()
+
+	for i := range 3 {
+		stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("stream.Close() error = %v", err)
+		}
+	}
+
+	if factoryCalls != 1 {
+		t.Fatalf("factoryCalls = %d, want 1", factoryCalls)
+	}
+}
+
+func TestOpenAfterCloseReinitializesStorageReader(t *testing.T) {
+	t.Parallel()
+
+	var factories []*stubFactory
+	r := newTestReader(t, &stubExtractor{},
+		WithGCSFactory(func(context.Context) (remoteio.IOFactory, error) {
+			f := &stubFactory{reader: &stubReader{content: "gcs body"}}
+			factories = append(factories, f)
+			return f, nil
+		}),
+	)
+
+	open := func() {
+		stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		if err := stream.Close(); err != nil {
+			t.Fatalf("stream.Close() error = %v", err)
+		}
+	}
+
+	open()
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	open()
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if len(factories) != 2 {
+		t.Fatalf("factory count = %d, want 2", len(factories))
+	}
+	for i, f := range factories {
+		if f.closeCalls != 1 {
+			t.Fatalf("factories[%d].closeCalls = %d, want 1", i, f.closeCalls)
+		}
+	}
+}
+
+func TestResolveMediaType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		contentType string
+		want        string
+		wantErr     bool
+	}{
+		{name: "empty header", contentType: "", want: ""},
+		{name: "with charset", contentType: "text/html; charset=utf-8", want: "text/html"},
+		{name: "uppercase", contentType: "TEXT/HTML", want: "text/html"},
+		{name: "no parameters", contentType: "image/png", want: "image/png"},
+		{name: "malformed but known", contentType: `text/html; charset="`, want: "text/html"},
+		{name: "malformed but known image", contentType: `image/jpeg; foo="`, want: "image/jpeg"},
+		{name: "malformed and unknown", contentType: `text/html-sandboxed; charset="`, wantErr: true},
+		{name: "malformed and unsupported", contentType: `application/json; charset="`, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := resolveMediaType(tt.contentType)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolveMediaType(%q) error = nil, want error", tt.contentType)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveMediaType(%q) error = %v", tt.contentType, err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveMediaType(%q) = %q, want %q", tt.contentType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyMediaType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		mediaType string
+		want      mediaKind
+	}{
+		{mediaType: "text/html", want: mediaKindHTML},
+		{mediaType: "application/xhtml+xml", want: mediaKindHTML},
+		{mediaType: "text/plain", want: mediaKindPassthrough},
+		{mediaType: "text/markdown", want: mediaKindPassthrough},
+		{mediaType: "text/x-markdown", want: mediaKindPassthrough},
+		{mediaType: "image/png", want: mediaKindPassthrough},
+		{mediaType: "image/svg+xml", want: mediaKindPassthrough},
+		{mediaType: "application/json", want: mediaKindUnsupported},
+		{mediaType: "text/html-sandboxed", want: mediaKindUnsupported},
+		{mediaType: "", want: mediaKindUnsupported},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.mediaType, func(t *testing.T) {
+			t.Parallel()
+
+			if got := classifyMediaType(tt.mediaType); got != tt.want {
+				t.Fatalf("classifyMediaType(%q) = %v, want %v", tt.mediaType, got, tt.want)
+			}
+		})
 	}
 }
 

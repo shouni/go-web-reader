@@ -12,12 +12,39 @@ import (
 	"github.com/shouni/go-http-kit/httpkit"
 )
 
-var supportedMediaTypes = []string{
-	"text/html",
-	"application/xhtml+xml",
-	"text/plain",
-	"text/markdown",
-	"text/x-markdown",
+// mediaKind は media type から決まる本文の扱い方です。
+type mediaKind int
+
+const (
+	// mediaKindUnsupported は本リーダーが扱わない media type です。
+	mediaKindUnsupported mediaKind = iota
+	// mediaKindHTML は本文抽出エンジンに通す media type です。
+	mediaKindHTML
+	// mediaKindPassthrough は変換せずそのまま返す media type です。
+	mediaKindPassthrough
+)
+
+// mediaKinds は既知の media type と扱い方の対応表です。
+// 対応 Content-Type を増やすときは、この表だけを更新すれば分岐と
+// フォールバック判定の両方に反映されます。
+var mediaKinds = map[string]mediaKind{
+	"text/html":             mediaKindHTML,
+	"application/xhtml+xml": mediaKindHTML,
+	"text/plain":            mediaKindPassthrough,
+	"text/markdown":         mediaKindPassthrough,
+	"text/x-markdown":       mediaKindPassthrough,
+}
+
+// classifyMediaType は media type の扱い方を返します。
+// image/* はサブタイプを問わずバイナリとしてそのまま通します。
+func classifyMediaType(mediaType string) mediaKind {
+	if kind, ok := mediaKinds[mediaType]; ok {
+		return kind
+	}
+	if strings.HasPrefix(mediaType, "image/") {
+		return mediaKindPassthrough
+	}
+	return mediaKindUnsupported
 }
 
 type httpClientFetcher struct {
@@ -48,25 +75,20 @@ func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, 
 // フェッチは httpClientFetcher.FetchBytes に一本化しており、レスポンスサイズの上限
 // （httpkit.HandleResponse による）がHTML以外のコンテンツタイプにも一貫して適用されます。
 func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadCloser, error) {
-	body, rawContentType, err := (httpClientFetcher{client: r.httpClient}).FetchBytes(ctx, uri)
+	body, rawContentType, err := r.fetcher.FetchBytes(ctx, uri)
 	if err != nil {
 		return nil, err
 	}
 
-	contentType, err := mediaType(rawContentType)
+	contentType, err := resolveMediaType(rawContentType)
 	if err != nil {
-		contentType = fallbackMediaType(rawContentType)
-		if contentType == "" {
-			return nil, fmt.Errorf("Content-Typeの解析に失敗しました: %w", err)
-		}
+		return nil, fmt.Errorf("Content-Typeの解析に失敗しました: %w", err)
 	}
 
-	switch {
-	case contentType == "text/html", contentType == "application/xhtml+xml":
-		return r.openExtractedHTML(ctx, uri, io.NopCloser(bytes.NewReader(body)))
-	case contentType == "text/plain", contentType == "text/markdown", contentType == "text/x-markdown":
-		return io.NopCloser(bytes.NewReader(body)), nil
-	case strings.HasPrefix(contentType, "image/"):
+	switch classifyMediaType(contentType) {
+	case mediaKindHTML:
+		return r.openExtractedHTML(ctx, uri, bytes.NewReader(body))
+	case mediaKindPassthrough:
 		return io.NopCloser(bytes.NewReader(body)), nil
 	default:
 		if contentType == "" {
@@ -98,9 +120,8 @@ func newHTTPRequest(ctx context.Context, uri string) (*http.Request, error) {
 }
 
 // openExtractedHTML は取得済み HTML から本文テキストを抽出して読み取りストリームを返します。
-func (r *UniversalReader) openExtractedHTML(ctx context.Context, uri string, body io.ReadCloser) (io.ReadCloser, error) {
-	defer body.Close()
-
+// body は取得済みバイト列を読むだけなので、クローズは不要です。
+func (r *UniversalReader) openExtractedHTML(ctx context.Context, uri string, body io.Reader) (io.ReadCloser, error) {
 	text, hasBody, err := r.extractor.ExtractText(ctx, body)
 	if err != nil {
 		return nil, err
@@ -112,29 +133,29 @@ func (r *UniversalReader) openExtractedHTML(ctx context.Context, uri string, bod
 	return io.NopCloser(strings.NewReader(text)), nil
 }
 
-// mediaType は Content-Type ヘッダーから media type だけを取り出して小文字化します。
-func mediaType(contentType string) (string, error) {
+// resolveMediaType は Content-Type ヘッダーから media type だけを取り出します。
+//
+// ヘッダーが RFC に沿わず解析できない場合（charset の引用符を閉じ忘れているなど、
+// 実在するサーバーが返してくるもの）でも、";" より前が既知の media type と一致すれば
+// それを採用します。未知の media type まで救うと、壊れたヘッダーを根拠に
+// 中身を誤って解釈することになるため、その場合は解析エラーをそのまま返します。
+func resolveMediaType(contentType string) (string, error) {
 	if contentType == "" {
 		return "", nil
 	}
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return "", err
-	}
-	return mediaType, nil
-}
 
-// fallbackMediaType は不正な Content-Type ヘッダーから既知の media type を推定します。
-func fallbackMediaType(contentType string) string {
-	parts := strings.SplitN(contentType, ";", 2)
-	normalized := strings.TrimSpace(strings.ToLower(parts[0]))
-	if strings.HasPrefix(normalized, "image/") {
-		return normalized
+	parsed, _, err := mime.ParseMediaType(contentType)
+	if err == nil {
+		return parsed, nil
 	}
-	for _, candidate := range supportedMediaTypes {
-		if normalized == candidate {
-			return candidate
-		}
+
+	normalized := strings.TrimSpace(strings.ToLower(contentType))
+	if i := strings.IndexByte(normalized, ';'); i >= 0 {
+		normalized = strings.TrimSpace(normalized[:i])
 	}
-	return ""
+	if classifyMediaType(normalized) != mediaKindUnsupported {
+		return normalized, nil
+	}
+
+	return "", err
 }
