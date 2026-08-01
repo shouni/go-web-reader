@@ -4,22 +4,28 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
+// storageReaderCache は 1 スキーム分のストレージリーダーを遅延初期化して保持します。
+//
+// ロックをリーダー本体ではなくキャッシュごとに持たせているのは、初期化に
+// 認証情報の解決などの I/O が伴うためです。共有ロックだと GCS の初期化が
+// 詰まっている間、S3 の Open や Close まで待たされます。
 type storageReaderCache struct {
+	label      string
+	newFactory StorageFactory
+
+	mu     sync.Mutex
 	reader remoteio.Reader
 	closer io.Closer
 }
 
-// openStorage は指定されたストレージリーダーを取得し、URI の読み取りストリームを返します。
-func (r *UniversalReader) openStorage(
-	ctx context.Context,
-	uri string,
-	getReader func(context.Context) (remoteio.Reader, error),
-) (io.ReadCloser, error) {
-	reader, err := getReader(ctx)
+// openStorage はスキームに対応するストレージリーダーを取得し、URI の読み取りストリームを返します。
+func (r *UniversalReader) openStorage(ctx context.Context, uri string, cache *storageReaderCache) (io.ReadCloser, error) {
+	reader, err := cache.get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -27,45 +33,27 @@ func (r *UniversalReader) openStorage(
 	return reader.Open(ctx, uri)
 }
 
-// getGCSReader は GCS リーダーを遅延初期化して返します。
-func (r *UniversalReader) getGCSReader(ctx context.Context) (remoteio.Reader, error) {
-	return r.getStorageReader(ctx, &r.gcs, r.newGCSFactory, "GCS")
-}
+// get はストレージリーダーを遅延初期化し、以後の呼び出しでは同じものを再利用します。
+func (c *storageReaderCache) get(ctx context.Context) (remoteio.Reader, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-// getS3Reader は S3 リーダーを遅延初期化して返します。
-func (r *UniversalReader) getS3Reader(ctx context.Context) (remoteio.Reader, error) {
-	return r.getStorageReader(ctx, &r.s3, r.newS3Factory, "S3")
-}
-
-// getStorageReader はストレージリーダーを遅延初期化し、以後の呼び出しで再利用します。
-func (r *UniversalReader) getStorageReader(
-	ctx context.Context,
-	cache *storageReaderCache,
-	newFactory storageFactoryFunc,
-	label string,
-) (remoteio.Reader, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if cache.reader != nil {
-		return cache.reader, nil
+	if c.reader != nil {
+		return c.reader, nil
 	}
 
-	reader, closer, err := newStorageReader(ctx, newFactory)
+	reader, closer, err := newStorageReader(ctx, c.newFactory)
 	if err != nil {
-		return nil, fmt.Errorf("%sリーダーの生成に失敗: %w", label, err)
+		return nil, fmt.Errorf("%sリーダーの生成に失敗: %w", c.label, err)
 	}
-	cache.reader = reader
-	cache.closer = closer
+	c.reader = reader
+	c.closer = closer
 
-	return cache.reader, nil
+	return c.reader, nil
 }
 
 // newStorageReader はストレージファクトリから入力リーダーとクローザーを生成します。
-func newStorageReader(
-	ctx context.Context,
-	newFactory func(context.Context) (remoteio.IOFactory, error),
-) (remoteio.Reader, io.Closer, error) {
+func newStorageReader(ctx context.Context, newFactory StorageFactory) (remoteio.Reader, io.Closer, error) {
 	factory, err := newFactory(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ストレージファクトリの生成に失敗: %w", err)
@@ -86,7 +74,11 @@ func newStorageReader(
 }
 
 // close は保持しているクローザーを閉じ、キャッシュ済みリーダーを解放します。
+// 解放後に再度 Open された場合は、次の get で初期化からやり直されます。
 func (c *storageReaderCache) close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.closer == nil {
 		c.reader = nil
 		return nil

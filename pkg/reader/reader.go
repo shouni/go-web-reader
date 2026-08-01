@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 
 	"github.com/shouni/go-http-kit/httpkit"
 	"github.com/shouni/go-remote-io/remoteio"
@@ -21,14 +20,11 @@ import (
 
 // UniversalReader は URI の種類に応じて読み取りストリームを返します。
 type UniversalReader struct {
-	mu            sync.Mutex
-	extractor     ports.Extractor
-	httpClient    HTTPClient
-	safeURL       safeURLFunc
-	newGCSFactory storageFactoryFunc
-	newS3Factory  storageFactoryFunc
-	gcs           storageReaderCache
-	s3            storageReaderCache
+	extractor ports.Extractor
+	fetcher   ports.Fetcher
+	safeURL   SafeURLValidator
+	gcs       storageReaderCache
+	s3        storageReaderCache
 }
 
 // New は UniversalReader の新しいインスタンスを生成します。
@@ -49,8 +45,9 @@ func New(opts ...Option) (*UniversalReader, error) {
 	if cfg.httpClient == nil {
 		cfg.httpClient = httpkit.New(httpkit.DefaultHTTPTimeout)
 	}
+	fetcher := httpClientFetcher{client: cfg.httpClient}
 	if cfg.extractor == nil {
-		extractor, err := extract.NewExtractor(httpClientFetcher{client: cfg.httpClient})
+		extractor, err := extract.NewExtractor(fetcher)
 		if err != nil {
 			return nil, fmt.Errorf("extractorの初期化エラー: %w", err)
 		}
@@ -67,11 +64,11 @@ func New(opts ...Option) (*UniversalReader, error) {
 	}
 
 	return &UniversalReader{
-		extractor:     cfg.extractor,
-		httpClient:    cfg.httpClient,
-		safeURL:       cfg.safeURL,
-		newGCSFactory: cfg.newGCSFactory,
-		newS3Factory:  cfg.newS3Factory,
+		extractor: cfg.extractor,
+		fetcher:   fetcher,
+		safeURL:   cfg.safeURL,
+		gcs:       storageReaderCache{label: "GCS", newFactory: cfg.newGCSFactory},
+		s3:        storageReaderCache{label: "S3", newFactory: cfg.newS3Factory},
 	}, nil
 }
 
@@ -91,22 +88,20 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 	case strings.HasPrefix(uri, securenet.SchemeHTTP), strings.HasPrefix(uri, securenet.SchemeHTTPS):
 		return r.openHTTP(ctx, uri)
 	case remoteio.IsGCSURI(uri):
-		return r.openStorage(ctx, uri, r.getGCSReader)
+		return r.openStorage(ctx, uri, &r.gcs)
 	case remoteio.IsS3URI(uri):
-		return r.openStorage(ctx, uri, r.getS3Reader)
+		return r.openStorage(ctx, uri, &r.s3)
 	}
 
-	return nil, fmt.Errorf("適切なリーダーが初期化されていません: %s", uri)
+	return nil, fmt.Errorf("未対応のURIスキームです: %s", uri)
 }
 
 // Close は内部で保持している外部リソースを解放します。
+// スキームごとに独立してロックするため、片方の解放がもう片方を待たせることはありません。
 func (r *UniversalReader) Close() error {
 	if r == nil {
 		return nil
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	return closeutil.Join(r.gcs.close, r.s3.close)
 }
