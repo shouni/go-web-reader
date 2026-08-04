@@ -122,12 +122,12 @@ github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUc
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/shouni/clibase v1.0.4 h1:eppU3pCVbTXuSqKx6iwgWEByJB2FSVWGyTuMYLcmJck=
 github.com/shouni/clibase v1.0.4/go.mod h1:q40nTjGV4DguTP9Jo2FyblMnOCI53/qzr2GE5vwGV3Q=
-github.com/shouni/go-http-kit v1.7.2 h1:etlQK0c6C89rhAtYRHGG1om8uDUc+oxw5Ss9SjO7FtQ=
-github.com/shouni/go-http-kit v1.7.2/go.mod h1:EBhrRSrscGl/5J6vG4x/KuEk/W3UelBsj3gg0ycNneM=
+github.com/shouni/go-http-kit v1.8.0 h1:CWAJ/7mJ6i2q8SAK4iHZvJOIvfQeKIKkcZb0YZVuKGI=
+github.com/shouni/go-http-kit v1.8.0/go.mod h1:EBhrRSrscGl/5J6vG4x/KuEk/W3UelBsj3gg0ycNneM=
 github.com/shouni/go-remote-io v1.7.2 h1:Oq1MEt6o3PW/U0naoKUZcBBxUI0s0EycHvLIiJ2PrdE=
 github.com/shouni/go-remote-io v1.7.2/go.mod h1:GrwICzOHPDiyE25M4msJYqjgRv+ndMsFkBRja8UTOKQ=
-github.com/shouni/go-utils v1.3.0 h1:GPa6Z1vd9mGVchreign2o3fz5nBAa02uHq7AwPNFw2w=
-github.com/shouni/go-utils v1.3.0/go.mod h1:MRR3X08kWJ+sSS2+KRuvWEikXui5Tixg9vta6r30SnE=
+github.com/shouni/go-utils v1.5.0 h1:uYjAMebKGDoZFDBZxugndcyTyaCpmNXd8KgnzueqnOg=
+github.com/shouni/go-utils v1.5.0/go.mod h1:MRR3X08kWJ+sSS2+KRuvWEikXui5Tixg9vta6r30SnE=
 github.com/shouni/go-web-exact/v2 v2.5.1 h1:Olnb41zlP07rw+X+0ouwrW+pdCbJiUZOX7y7cjKnh8I=
 github.com/shouni/go-web-exact/v2 v2.5.1/go.mod h1:Xo3uMidhqzzNidp7mKa9UYX1oiF7LZ//aSU7ZZW5WmQ=
 github.com/shouni/netarmor v1.2.0 h1:dubvM231CMkYz6bhYNB29Gp4YA3UnP6Wq0wfwzMFxnI=

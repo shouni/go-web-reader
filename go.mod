@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/shouni/clibase v1.0.4
-	github.com/shouni/go-http-kit v1.7.2
+	github.com/shouni/go-http-kit v1.8.0
 	github.com/shouni/go-remote-io v1.7.2
 	github.com/shouni/go-web-exact/v2 v2.5.1
 	github.com/shouni/netarmor v1.2.0
@@ -60,7 +60,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/shouni/go-utils v1.3.0 // indirect
+	github.com/shouni/go-utils v1.5.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
