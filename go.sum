@@ -128,8 +128,8 @@ github.com/shouni/go-remote-io v1.7.2 h1:Oq1MEt6o3PW/U0naoKUZcBBxUI0s0EycHvLIiJ2
 github.com/shouni/go-remote-io v1.7.2/go.mod h1:GrwICzOHPDiyE25M4msJYqjgRv+ndMsFkBRja8UTOKQ=
 github.com/shouni/go-utils v1.5.0 h1:uYjAMebKGDoZFDBZxugndcyTyaCpmNXd8KgnzueqnOg=
 github.com/shouni/go-utils v1.5.0/go.mod h1:MRR3X08kWJ+sSS2+KRuvWEikXui5Tixg9vta6r30SnE=
-github.com/shouni/go-web-exact/v2 v2.5.1 h1:Olnb41zlP07rw+X+0ouwrW+pdCbJiUZOX7y7cjKnh8I=
-github.com/shouni/go-web-exact/v2 v2.5.1/go.mod h1:Xo3uMidhqzzNidp7mKa9UYX1oiF7LZ//aSU7ZZW5WmQ=
+github.com/shouni/go-web-exact/v2 v2.5.2 h1:B5+bJ2XYKCYHKxbmE4TjoXuPbkXc3obdTNwirLcD42s=
+github.com/shouni/go-web-exact/v2 v2.5.2/go.mod h1:NXb5h5k+jKM9KhkyPmsmEUrETIlBVB+8GP8CZRmSEDQ=
 github.com/shouni/netarmor v1.2.0 h1:dubvM231CMkYz6bhYNB29Gp4YA3UnP6Wq0wfwzMFxnI=
 github.com/shouni/netarmor v1.2.0/go.mod h1:WxojUH0M+Z2lqZH2vw572A1zn5l1VkH7V47rnTnZmVY=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
