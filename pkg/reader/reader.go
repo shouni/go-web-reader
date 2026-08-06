@@ -8,10 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/shouni/go-http-kit/httpkit"
 	"github.com/shouni/go-remote-io/remoteio"
-	"github.com/shouni/go-remote-io/remoteio/gcs"
-	"github.com/shouni/go-remote-io/remoteio/s3"
 	"github.com/shouni/go-web-exact/v2/extract"
 	"github.com/shouni/go-web-exact/v2/ports"
 	"github.com/shouni/go-web-reader/internal/closeutil"
@@ -23,52 +20,39 @@ type UniversalReader struct {
 	extractor ports.Extractor
 	fetcher   ports.Fetcher
 	safeURL   SafeURLValidator
-	gcs       storageReaderCache
-	s3        storageReaderCache
+	// storages はスキームのプレフィックスをキーにしたストレージリーダーです。
+	// スキームを増やすときに触るのがこのマップの組み立てだけで済むよう、
+	// フィールドに直書きしていません（以前は追加のたびに構造体・New・Open・Close の
+	// 4 箇所を触る必要がありました）。
+	storages map[string]*storageReaderCache
 }
 
 // New は UniversalReader の新しいインスタンスを生成します。
 func New(opts ...Option) (*UniversalReader, error) {
-	cfg := options{
-		// securenet.ValidateURL は可変長オプションを取るため、そのままでは
-		// safeURLFunc に代入できない。既定ポリシーで呼ぶラッパを噛ませる。
-		safeURL: func(ctx context.Context, uri string) error {
-			return securenet.ValidateURL(ctx, uri)
-		},
-		newGCSFactory: func(ctx context.Context) (remoteio.IOFactory, error) { return gcs.New(ctx) },
-		newS3Factory:  func(ctx context.Context) (remoteio.IOFactory, error) { return s3.New(ctx) },
-	}
-	for _, opt := range opts {
-		opt(&cfg)
+	cfg := newOptions(opts...)
+
+	fetcher := cfg.fetcher
+	if fetcher == nil {
+		fetcher = httpClientFetcher{client: cfg.httpClient}
 	}
 
-	if cfg.httpClient == nil {
-		cfg.httpClient = httpkit.New(httpkit.DefaultHTTPTimeout)
-	}
-	fetcher := httpClientFetcher{client: cfg.httpClient}
-	if cfg.extractor == nil {
-		extractor, err := extract.NewExtractor(fetcher)
+	extractor := cfg.extractor
+	if extractor == nil {
+		built, err := extract.NewExtractor(fetcher)
 		if err != nil {
 			return nil, fmt.Errorf("extractorの初期化エラー: %w", err)
 		}
-		cfg.extractor = extractor
-	}
-	if cfg.safeURL == nil {
-		return nil, fmt.Errorf("safe URL validator is required")
-	}
-	if cfg.newGCSFactory == nil {
-		return nil, fmt.Errorf("GCS factory is required")
-	}
-	if cfg.newS3Factory == nil {
-		return nil, fmt.Errorf("S3 factory is required")
+		extractor = built
 	}
 
 	return &UniversalReader{
-		extractor: cfg.extractor,
+		extractor: extractor,
 		fetcher:   fetcher,
 		safeURL:   cfg.safeURL,
-		gcs:       storageReaderCache{label: "GCS", newFactory: cfg.newGCSFactory},
-		s3:        storageReaderCache{label: "S3", newFactory: cfg.newS3Factory},
+		storages: map[string]*storageReaderCache{
+			remoteio.PrefixGCS: {label: "GCS", newFactory: cfg.newGCSFactory},
+			remoteio.PrefixS3:  {label: "S3", newFactory: cfg.newS3Factory},
+		},
 	}, nil
 }
 
@@ -84,13 +68,13 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 		return nil, fmt.Errorf("URL安全性検証に失敗しました: %w", err)
 	}
 
-	switch {
-	case strings.HasPrefix(uri, securenet.SchemeHTTP), strings.HasPrefix(uri, securenet.SchemeHTTPS):
+	if strings.HasPrefix(uri, securenet.SchemeHTTP) || strings.HasPrefix(uri, securenet.SchemeHTTPS) {
 		return r.openHTTP(ctx, uri)
-	case remoteio.IsGCSURI(uri):
-		return r.openStorage(ctx, uri, &r.gcs)
-	case remoteio.IsS3URI(uri):
-		return r.openStorage(ctx, uri, &r.s3)
+	}
+	// スキームの取り出しは go-remote-io と同じ関数を使います。自前で判定を書くと、
+	// 「どこからがスキームか」の解釈が両者でずれます。
+	if cache, ok := r.storages[remoteio.SchemePrefix(uri)]; ok {
+		return r.openStorage(ctx, uri, cache)
 	}
 
 	return nil, fmt.Errorf("未対応のURIスキームです: %s", uri)
@@ -98,10 +82,16 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 
 // Close は内部で保持している外部リソースを解放します。
 // スキームごとに独立してロックするため、片方の解放がもう片方を待たせることはありません。
+// Close は終端です。解放後の Open は ErrClosed を返します。
 func (r *UniversalReader) Close() error {
 	if r == nil {
 		return nil
 	}
 
-	return closeutil.Join(r.gcs.close, r.s3.close)
+	fns := make([]func() error, 0, len(r.storages))
+	for _, cache := range r.storages {
+		fns = append(fns, cache.close)
+	}
+
+	return closeutil.Join(fns...)
 }

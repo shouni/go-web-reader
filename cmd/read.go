@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/spf13/cobra"
@@ -24,6 +25,10 @@ var readCmd = &cobra.Command{
 // --------------------------------------------------------------------------
 
 // readCommand は、指定されたURIからコンテキストを取得し、その結果を標準出力に直接表示します。
+//
+// 標準出力へは取得内容だけを流し、見出しや区切り線は標準エラーへ出します。
+// 装飾を混ぜると `go-web-reader read -u ... > out.txt` や他コマンドへのパイプで
+// そのまま使えなくなるためです。
 func readCommand(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	appCtx, err := builder.BuildContainer(opts)
@@ -37,19 +42,45 @@ func readCommand(cmd *cobra.Command, _ []string) error {
 		}
 	}()
 
-	result, err := appCtx.Pipeline.Execute(ctx)
-	if err != nil {
+	out := &decoratedWriter{
+		out:    cmd.OutOrStdout(),
+		notice: cmd.ErrOrStderr(),
+		header: "--- 取得結果 ---",
+	}
+	if err := appCtx.Pipeline.Execute(ctx, out); err != nil {
 		return fmt.Errorf("実行に失敗しました: %w", err)
 	}
-	printResult(result)
+	out.finish("-----------------------------------------------------")
+
 	slog.Info("結果を標準出力に出力しました。")
 
 	return nil
 }
 
-// printResult は結果を標準出力にフォーマットして表示します。
-func printResult(result string) {
-	fmt.Println("\n--- 取得結果 ---")
-	fmt.Println(result)
-	fmt.Println("-----------------------------------------------------")
+// decoratedWriter は、最初の 1 バイトが書かれたときにだけ見出しを notice へ出します。
+//
+// 取得前に見出しを出すと、取得に失敗したときにも「--- 取得結果 ---」だけが
+// 残ります。出力があったときにだけ枠を出すため、書き込みまで遅延させます。
+type decoratedWriter struct {
+	out     io.Writer
+	notice  io.Writer
+	header  string
+	started bool
+}
+
+// Write は最初の呼び出しで見出しを出してから、本文を out へ流します。
+func (w *decoratedWriter) Write(p []byte) (int, error) {
+	if !w.started && len(p) > 0 {
+		w.started = true
+		_, _ = fmt.Fprintln(w.notice, w.header)
+	}
+	return w.out.Write(p)
+}
+
+// finish は、本文が 1 バイトでも出ていれば閉じの区切り線を notice へ出します。
+func (w *decoratedWriter) finish(footer string) {
+	if !w.started {
+		return
+	}
+	_, _ = fmt.Fprintln(w.notice, "\n"+footer)
 }

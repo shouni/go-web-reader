@@ -34,21 +34,22 @@ cmd/            Cobra CLI (root.go registers --uri flag + PreRunE validation; re
 internal/builder    DI: turns a *config.Config into a fully-wired *app.Container
 internal/app        Container holds Config, the Pipeline, and a slice of io.Closer for cleanup
 internal/pipeline   Business logic: depends only on the ContentReader interface, not on pkg/reader directly
-internal/domain     The Pipeline port (interface) that internal/app depends on
 internal/config     Config struct (SourceURL) + Normalize/Validate
 internal/closeutil  closeutil.Join(...) — runs multiple closers, merges errors with errors.Join
 pkg/reader          Public library: UniversalReader, the actual scheme-dispatching implementation
 ```
 
-Dependency direction: `cmd` → `builder` → `app`/`pipeline` → `domain` (interfaces only). `internal/pipeline` never imports `pkg/reader` directly — it depends on its own local `ContentReader` interface, and `builder` supplies a `*pkgreader.UniversalReader` that satisfies it. This is what lets `pipeline_test.go` and `container_test.go` run without any real network/storage clients.
+Dependency direction: `cmd` → `builder` → `app`/`pipeline`. `internal/pipeline` never imports `pkg/reader` directly — it depends on its own local `ContentReader` interface, and `builder` supplies a `*pkgreader.UniversalReader` that satisfies it. This is what lets `pipeline_test.go` and `container_test.go` run without any real network/storage clients. `app.Container` holds `*pipeline.Pipeline` directly: the implementation is the only one and nobody swaps it, so an interface in between bought nothing — the seam that matters is `ContentReader`, one level in.
+
+`Pipeline.Execute(ctx, w io.Writer) error` streams straight from the `io.ReadCloser` into the writer instead of returning a string. `cmd/read.go` passes stdout, so a `gs://` file of any size costs one copy buffer, and stdout carries only the fetched bytes — headings and separators go to stderr so `read -u ... > out.txt` and pipes stay usable.
 
 ### pkg/reader (the actual engine)
 
 - `reader.New(opts ...Option)` does a *lightweight* init only. GCS/S3 clients are lazily constructed on first `Open()` call for that scheme, cached in `storageReaderCache`, and released together on `Close()` via `closeutil.Join`.
-- `Open(ctx, uri)` dispatches on scheme: `http(s)://` → `http.go`, `gs://`/`s3://` (checked via `remoteio.IsGCSURI`/`IsS3URI`) → `storage.go`. Every URI is passed through `securenet.IsSafeURL` before anything else runs.
+- `Open(ctx, uri)` dispatches on scheme: `http(s)://` → `http.go`, otherwise `remoteio.SchemePrefix(uri)` is looked up in the `storages` map (`remoteio.PrefixGCS` / `PrefixS3` → `storage.go`). Adding a scheme means one more map entry in `New`; it used to mean touching the struct, `New`, `Open` and `Close`. Every URI is passed through `securenet.ValidateURL` before anything else runs.
 - `http.go`: fetches via `HTTPClient` (defaults to `httpkit.New`), then branches on the response `Content-Type`. The `mediaKinds` table is the single source of truth for what is supported: `text/html`/`application/xhtml+xml` map to `mediaKindHTML` and go through the `go-web-exact` extractor (`openExtractedHTML`) to strip boilerplate and return body text only; `text/plain`/`text/markdown`/`text/x-markdown` and any `image/*` map to `mediaKindPassthrough` and are streamed back unmodified; anything else is an error. Add a new supported Content-Type by editing that table alone — `classifyMediaType` drives both the dispatch switch and the malformed-header fallback. `resolveMediaType` parses the header and, when it is not RFC-compliant (e.g. an unclosed `charset="`), falls back to the substring before `;` but only accepts it if it is already a known media type.
-- `storage.go`: GCS/S3 readers are built from `remoteio.IOFactory` and cached per-scheme in a `storageReaderCache`, which carries its own `label`, `newFactory` and `sync.Mutex`. The lock is per-cache rather than shared on `UniversalReader` on purpose: factory construction does real I/O (credential resolution), so a shared lock would let a slow GCS init block S3 `Open` and `Close`. The underlying `remoteio.Reader`/`io.Closer` pair is reused across calls until `Close()`, after which the next `Open` re-initializes.
-- `options.go` exposes `With*` functional options (`WithExtractor`, `WithHTTPClient`, `WithSafeURLValidator`, `WithGCSFactory`, `WithS3Factory`) — this is the seam tests and embedding applications use to swap out real network/cloud dependencies for fakes.
+- `storage.go`: GCS/S3 readers are built from `remoteio.IOFactory` and cached per-scheme in a `storageReaderCache`, which carries its own `label`, `newFactory` and `sync.Mutex`. The lock is per-cache rather than shared on `UniversalReader` on purpose: factory construction does real I/O (credential resolution), so a shared lock would let a slow GCS init block S3 `Open` and `Close`. **`Close` is terminal**: the cached `remoteio.Reader`/`io.Closer` pair is reused until `Close()`, after which `Open` returns `ErrClosed`. It used to silently re-initialize, so a reader someone had closed would quietly build a new GCS client.
+- `options.go` exposes `With*` functional options (`WithExtractor`, `WithFetcher`, `WithHTTPClient`, `WithSafeURLValidator`, `WithGCSFactory`, `WithS3Factory`) — this is the seam tests and embedding applications use to swap out real network/cloud dependencies for fakes. Defaults live in `newOptions`, and every option ignores a nil value, so a required dependency can never end up nil; `New` no longer re-checks fields it just defaulted. `WithExtractor` swaps only the extraction engine — use `WithFetcher` to replace HTTP fetching itself.
 
 ### Resource cleanup convention
 
@@ -57,5 +58,5 @@ Anything that opens external resources (HTTP client, GCS/S3 factories, the reade
 ## Key dependencies
 
 - [`go-web-exact`](https://github.com/shouni/go-web-exact) — the main-content extraction engine used for HTML.
-- [`go-remote-io`](https://github.com/shouni/go-remote-io) — GCS/S3 abstraction (`remoteio.IOFactory`, `IsGCSURI`/`IsS3URI`).
-- `go-http-kit`, `netarmor` (URL safety validation via `securenet.IsSafeURL`), `clibase` (CLI bootstrapping used in `cmd/root.go`).
+- [`go-remote-io`](https://github.com/shouni/go-remote-io) — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, and the `gcs.New`/`s3.New` factories). Scheme parsing is deliberately borrowed rather than reimplemented, so the two libraries cannot disagree on where a scheme ends.
+- `go-http-kit`, `netarmor` (URL safety validation via `securenet.ValidateURL`), `clibase` (CLI bootstrapping used in `cmd/root.go`).

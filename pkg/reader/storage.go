@@ -9,6 +9,9 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
+// ErrClosed は、Close 済みの UniversalReader を使おうとしたことを表します。
+var ErrClosed = fmt.Errorf("reader is closed")
+
 // storageReaderCache は 1 スキーム分のストレージリーダーを遅延初期化して保持します。
 //
 // ロックをリーダー本体ではなくキャッシュごとに持たせているのは、初期化に
@@ -21,6 +24,7 @@ type storageReaderCache struct {
 	mu     sync.Mutex
 	reader remoteio.Reader
 	closer io.Closer
+	closed bool
 }
 
 // openStorage はスキームに対応するストレージリーダーを取得し、URI の読み取りストリームを返します。
@@ -38,6 +42,9 @@ func (c *storageReaderCache) get(ctx context.Context) (remoteio.Reader, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.closed {
+		return nil, fmt.Errorf("%sリーダーは利用できません: %w", c.label, ErrClosed)
+	}
 	if c.reader != nil {
 		return c.reader, nil
 	}
@@ -73,19 +80,23 @@ func newStorageReader(ctx context.Context, newFactory StorageFactory) (remoteio.
 	return reader, factory, nil
 }
 
-// close は保持しているクローザーを閉じ、キャッシュ済みリーダーを解放します。
-// 解放後に再度 Open された場合は、次の get で初期化からやり直されます。
+// close は保持しているクローザーを閉じ、以後の利用を拒否します。
+//
+// io.Closer の慣習どおり Close は終端です。以前は解放後の Open が黙って
+// 初期化からやり直しており、ライブラリとして組み込んだ側からは
+// 「閉じたはずのものが接続を張り直す」ように見えていました。
 func (c *storageReaderCache) close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.closed = true
+	c.reader = nil
+
 	if c.closer == nil {
-		c.reader = nil
 		return nil
 	}
 
 	err := c.closer.Close()
-	c.reader = nil
 	c.closer = nil
 
 	return err
