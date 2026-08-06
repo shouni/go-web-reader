@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -77,24 +78,26 @@ func TestNewPipeline(t *testing.T) {
 	}
 }
 
-func TestExecuteReadsAndTrimsContent(t *testing.T) {
+// Execute は読み取ったストリームを加工せずそのまま writer へ流します。
+// 途中で文字列に変換しないため、大きなファイルでもメモリに載りません。
+func TestExecuteStreamsContentVerbatim(t *testing.T) {
 	t.Parallel()
 
+	const content = "  hello world\n"
 	reader := &stubContentReader{
-		stream: io.NopCloser(strings.NewReader("  hello world\n")),
+		stream: io.NopCloser(strings.NewReader(content)),
 	}
-	// Note: トリムは config 層で行われる前提なので、テストでもトリム済みの値を渡す
 	p, err := NewPipeline("https://example.com/article", reader)
 	if err != nil {
 		t.Fatalf("NewPipeline() unexpected error = %v", err)
 	}
 
-	got, err := p.Execute(context.Background())
-	if err != nil {
+	var buf bytes.Buffer
+	if err := p.Execute(context.Background(), &buf); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if got != "hello world" {
-		t.Fatalf("Execute() = %q, want %q", got, "hello world")
+	if got := buf.String(); got != content {
+		t.Fatalf("Execute() wrote %q, want %q", got, content)
 	}
 	if reader.lastURI != "https://example.com/article" {
 		t.Fatalf("reader.lastURI = %q", reader.lastURI)
@@ -127,7 +130,7 @@ func TestExecuteValidatesContextAndReceiver(t *testing.T) {
 				p.reader = &stubContentReader{stream: nil}
 			}
 
-			_, err := tt.p.Execute(tt.ctx)
+			err := tt.p.Execute(tt.ctx, io.Discard)
 			if err == nil {
 				t.Fatal("Execute() error = nil, want error")
 			}
@@ -147,7 +150,7 @@ func TestExecuteWrapsReaderErrors(t *testing.T) {
 		t.Fatalf("NewPipeline() error = %v", err)
 	}
 
-	_, err = p.Execute(context.Background())
+	err = p.Execute(context.Background(), io.Discard)
 	if !errors.Is(err, readErr) {
 		t.Fatalf("Execute() error = %v, want wrapping %v", err, readErr)
 	}
@@ -162,8 +165,27 @@ func TestExecuteWrapsOpenErrors(t *testing.T) {
 		t.Fatalf("NewPipeline() error = %v", err)
 	}
 
-	_, err = p.Execute(context.Background())
+	err = p.Execute(context.Background(), io.Discard)
 	if !errors.Is(err, openErr) {
 		t.Fatalf("Execute() error = %v, want wrapping %v", err, openErr)
+	}
+}
+
+// 書き出し先が無ければ実行しないこと。Open してから気づくと、
+// 取得だけして捨てることになります。
+func TestExecuteRequiresWriter(t *testing.T) {
+	t.Parallel()
+
+	reader := &stubContentReader{stream: io.NopCloser(strings.NewReader("x"))}
+	p, err := NewPipeline("https://example.com", reader)
+	if err != nil {
+		t.Fatalf("NewPipeline() error = %v", err)
+	}
+
+	if err := p.Execute(context.Background(), nil); err == nil {
+		t.Fatal("Execute() error = nil, want error")
+	}
+	if reader.lastURI != "" {
+		t.Fatalf("writer が無いのに Open している: %q", reader.lastURI)
 	}
 }

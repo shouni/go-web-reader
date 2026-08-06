@@ -35,7 +35,7 @@
 
 ### ⚡ [orchestration] 実行オーケストレーション
 
-* **CLI Entry Point**: `cmd/read.go` から URI を受け取り、パイプライン経由で結果を標準出力に出力します。
+* **CLI Entry Point**: `cmd/read.go` から URI を受け取り、パイプライン経由で結果を標準出力へストリームします。標準出力には取得内容だけを流し、見出しや区切り線は標準エラーへ出すため、リダイレクトやパイプにそのまま渡せます。
 * **Dependency Injection**: `internal/builder` で `reader` と `pipeline` を組み立て、`internal/pipeline` は抽象化された `ContentReader` に依存します。
 * **Resource Safety**: アプリケーション終了時の close エラーは握りつぶさず、ログや呼び出し元で確認できるようにしています。
 

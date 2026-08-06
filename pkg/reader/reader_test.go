@@ -360,7 +360,7 @@ func TestReadGCSUsesInjectedReader(t *testing.T) {
 
 	storageReader := &stubReader{content: "gcs body"}
 	r := newTestReader(t, &stubExtractor{})
-	r.gcs.reader = storageReader
+	storageCache(t, r, remoteio.PrefixGCS).reader = storageReader
 
 	stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
 	if err != nil {
@@ -385,7 +385,7 @@ func TestReadS3UsesInjectedReader(t *testing.T) {
 
 	storageReader := &stubReader{content: "s3 body"}
 	r := newTestReader(t, &stubExtractor{})
-	r.s3.reader = storageReader
+	storageCache(t, r, remoteio.PrefixS3).reader = storageReader
 
 	stream, err := r.Open(context.Background(), "s3://bucket/path.txt")
 	if err != nil {
@@ -448,28 +448,90 @@ func TestReadWrapsSafeCheckerError(t *testing.T) {
 	}
 }
 
-func TestNewRejectsNilRequiredDependencies(t *testing.T) {
+// nil を渡したオプションは無視され、既定値が保たれること。
+//
+// 以前は New 側で「既定値が入っているはずのフィールドが nil でないか」を検証して
+// いましたが、それは明示的に nil を渡したときにしか到達しない分岐でした。
+// 入口で弾く形にして、必須依存が欠けた状態を作れないようにしています。
+func TestNilOptionsAreIgnored(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
 		opt  Option
 	}{
+		{name: "nil の Option そのもの", opt: nil},
 		{name: "safe URL validator", opt: WithSafeURLValidator(nil)},
 		{name: "GCS factory", opt: WithGCSFactory(nil)},
 		{name: "S3 factory", opt: WithS3Factory(nil)},
+		{name: "HTTP client", opt: WithHTTPClient(nil)},
+		{name: "extractor", opt: WithExtractor(nil)},
+		{name: "fetcher", opt: WithFetcher(nil)},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := New(WithExtractor(&stubExtractor{}), tt.opt)
-			if err == nil {
-				t.Fatal("New() error = nil, want error")
+			r, err := New(WithExtractor(&stubExtractor{}), tt.opt)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if r.safeURL == nil || r.extractor == nil || r.fetcher == nil {
+				t.Fatal("nil オプションで既定の依存が失われている")
+			}
+			for _, scheme := range []string{remoteio.PrefixGCS, remoteio.PrefixS3} {
+				if storageCache(t, r, scheme).newFactory == nil {
+					t.Fatalf("%s のファクトリが失われている", scheme)
+				}
 			}
 		})
 	}
+}
+
+// WithFetcher は HTTP 取得処理そのものを差し替えること。
+// WithExtractor は抽出器しか差し替えないため、取得側を差し替える口が別に要ります。
+func TestWithFetcherReplacesHTTPFetching(t *testing.T) {
+	t.Parallel()
+
+	fetcher := &stubFetcher{body: []byte("fetched"), contentType: "text/plain"}
+	r, err := New(WithExtractor(&stubExtractor{}), WithFetcher(fetcher))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	stream, err := r.Open(context.Background(), "https://example.com/a.txt")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "fetched" {
+		t.Fatalf("body = %q, want %q", got, "fetched")
+	}
+	if fetcher.lastURI != "https://example.com/a.txt" {
+		t.Fatalf("fetcher.lastURI = %q", fetcher.lastURI)
+	}
+}
+
+// stubFetcher は ports.Fetcher を満たすスタブです。
+type stubFetcher struct {
+	body        []byte
+	contentType string
+	err         error
+	lastURI     string
+}
+
+func (s *stubFetcher) FetchBytes(_ context.Context, uri string) ([]byte, string, error) {
+	s.lastURI = uri
+	if s.err != nil {
+		return nil, "", s.err
+	}
+	return s.body, s.contentType, nil
 }
 
 func TestCloseClosesManagedResources(t *testing.T) {
@@ -478,10 +540,12 @@ func TestCloseClosesManagedResources(t *testing.T) {
 	gcsCloser := &stubCloser{}
 	s3Closer := &stubCloser{}
 	r := newTestReader(t, &stubExtractor{})
-	r.gcs.reader = &stubReader{}
-	r.gcs.closer = gcsCloser
-	r.s3.reader = &stubReader{}
-	r.s3.closer = s3Closer
+	gcsCache := storageCache(t, r, remoteio.PrefixGCS)
+	s3Cache := storageCache(t, r, remoteio.PrefixS3)
+	gcsCache.reader = &stubReader{}
+	gcsCache.closer = gcsCloser
+	s3Cache.reader = &stubReader{}
+	s3Cache.closer = s3Closer
 
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -489,9 +553,39 @@ func TestCloseClosesManagedResources(t *testing.T) {
 	if gcsCloser.closed != 1 || s3Closer.closed != 1 {
 		t.Fatalf("close counts = (%d, %d), want (1, 1)", gcsCloser.closed, s3Closer.closed)
 	}
-	if r.gcs.reader != nil || r.gcs.closer != nil || r.s3.reader != nil || r.s3.closer != nil {
+	if gcsCache.reader != nil || gcsCache.closer != nil || s3Cache.reader != nil || s3Cache.closer != nil {
 		t.Fatal("managed resources were not cleared")
 	}
+}
+
+// Close は終端であり、解放後の Open は ErrClosed になること。
+// 以前は黙って初期化からやり直しており、組み込んだ側からは
+// 「閉じたはずのものが接続を張り直す」ように見えていました。
+func TestOpenAfterCloseIsRejected(t *testing.T) {
+	t.Parallel()
+
+	r := newTestReader(t, &stubExtractor{})
+	storageCache(t, r, remoteio.PrefixGCS).reader = &stubReader{content: "x"}
+
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	_, err := r.Open(context.Background(), "gs://bucket/path.txt")
+	if !errors.Is(err, ErrClosed) {
+		t.Fatalf("Open() after Close error = %v, want ErrClosed", err)
+	}
+}
+
+// storageCache は、スキームに対応するキャッシュをテストから取り出します。
+func storageCache(t *testing.T, r *UniversalReader, scheme string) *storageReaderCache {
+	t.Helper()
+
+	cache, ok := r.storages[scheme]
+	if !ok {
+		t.Fatalf("スキーム %q のストレージが登録されていません", scheme)
+	}
+	return cache
 }
 
 func TestNewStorageReaderClosesFactoryOnReaderError(t *testing.T) {
@@ -638,7 +732,12 @@ func TestOpenStorageReusesCachedReader(t *testing.T) {
 	}
 }
 
-func TestOpenAfterCloseReinitializesStorageReader(t *testing.T) {
+// Close 後の Open は接続を張り直さないこと。
+//
+// 以前は解放後の Open がファクトリを呼び直しており、Close したつもりの
+// リーダーが新しい GCS クライアントを作っていました。io.Closer の慣習どおり
+// Close を終端にして、この経路を塞いでいます。
+func TestOpenAfterCloseDoesNotReinitialize(t *testing.T) {
 	t.Parallel()
 
 	var factories []*stubFactory
@@ -650,32 +749,35 @@ func TestOpenAfterCloseReinitializesStorageReader(t *testing.T) {
 		}),
 	)
 
-	open := func() {
-		stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
-		if err != nil {
-			t.Fatalf("Open() error = %v", err)
-		}
-		if err := stream.Close(); err != nil {
-			t.Fatalf("stream.Close() error = %v", err)
-		}
+	stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("stream.Close() error = %v", err)
 	}
 
-	open()
-	if err := r.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-	open()
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	if len(factories) != 2 {
-		t.Fatalf("factory count = %d, want 2", len(factories))
+	if _, err := r.Open(context.Background(), "gs://bucket/path.txt"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Open() after Close error = %v, want ErrClosed", err)
 	}
-	for i, f := range factories {
-		if f.closeCalls != 1 {
-			t.Fatalf("factories[%d].closeCalls = %d, want 1", i, f.closeCalls)
-		}
+
+	if len(factories) != 1 {
+		t.Fatalf("factory count = %d, want 1 (Close 後に作り直してはいけない)", len(factories))
+	}
+	if factories[0].closeCalls != 1 {
+		t.Fatalf("factories[0].closeCalls = %d, want 1", factories[0].closeCalls)
+	}
+
+	// Close は冪等であること（多重解放でエラーにしない）。
+	if err := r.Close(); err != nil {
+		t.Fatalf("2 度目の Close() error = %v", err)
+	}
+	if factories[0].closeCalls != 1 {
+		t.Fatalf("2 度目の Close で closeCalls = %d, want 1", factories[0].closeCalls)
 	}
 }
 
