@@ -136,8 +136,8 @@ github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUc
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 h1:GHRpF1pTW19a8tTFrMLUcfWwyC0pnifVo2ClaLq+hP8=
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5PCi+MFsC7HjREoAz1BU+Mq60+05gifQSsHSDG/8=
-github.com/shouni/clibase v1.0.4 h1:eppU3pCVbTXuSqKx6iwgWEByJB2FSVWGyTuMYLcmJck=
-github.com/shouni/clibase v1.0.4/go.mod h1:q40nTjGV4DguTP9Jo2FyblMnOCI53/qzr2GE5vwGV3Q=
+github.com/shouni/clibase v1.0.5 h1:VPWvfOXbKZRQWim9frsMqrchzpr4vgVMpDDQd+UDm6o=
+github.com/shouni/clibase v1.0.5/go.mod h1:q40nTjGV4DguTP9Jo2FyblMnOCI53/qzr2GE5vwGV3Q=
 github.com/shouni/go-http-kit v1.8.0 h1:CWAJ/7mJ6i2q8SAK4iHZvJOIvfQeKIKkcZb0YZVuKGI=
 github.com/shouni/go-http-kit v1.8.0/go.mod h1:EBhrRSrscGl/5J6vG4x/KuEk/W3UelBsj3gg0ycNneM=
 github.com/shouni/go-remote-io v1.8.0 h1:+YbK9w1KIJccF+SzfMJS7odUVyIVd0iSTaQ37MGz+Xc=
@@ -146,8 +146,8 @@ github.com/shouni/go-utils v1.5.0 h1:uYjAMebKGDoZFDBZxugndcyTyaCpmNXd8KgnzueqnOg
 github.com/shouni/go-utils v1.5.0/go.mod h1:MRR3X08kWJ+sSS2+KRuvWEikXui5Tixg9vta6r30SnE=
 github.com/shouni/go-web-exact/v2 v2.5.2 h1:B5+bJ2XYKCYHKxbmE4TjoXuPbkXc3obdTNwirLcD42s=
 github.com/shouni/go-web-exact/v2 v2.5.2/go.mod h1:NXb5h5k+jKM9KhkyPmsmEUrETIlBVB+8GP8CZRmSEDQ=
-github.com/shouni/netarmor v1.2.0 h1:dubvM231CMkYz6bhYNB29Gp4YA3UnP6Wq0wfwzMFxnI=
-github.com/shouni/netarmor v1.2.0/go.mod h1:WxojUH0M+Z2lqZH2vw572A1zn5l1VkH7V47rnTnZmVY=
+github.com/shouni/netarmor v1.2.1 h1:EwSvhPKOA+rVMceIHn+YpqlWn3bHKovrSOi1MX6ajdY=
+github.com/shouni/netarmor v1.2.1/go.mod h1:WxojUH0M+Z2lqZH2vw572A1zn5l1VkH7V47rnTnZmVY=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
 github.com/spf13/cobra v1.10.2/go.mod h1:7C1pvHqHw5A4vrJfjNwvOdzYu0Gml16OCs2GRiTUUS4=
 github.com/spf13/pflag v1.0.9 h1:9exaQaMOCwffKiiiYk6/BndUBv+iRViNW+4lEMi0PvY=

@@ -3,11 +3,11 @@ module github.com/shouni/go-web-reader
 go 1.26
 
 require (
-	github.com/shouni/clibase v1.0.4
+	github.com/shouni/clibase v1.0.5
 	github.com/shouni/go-http-kit v1.8.0
 	github.com/shouni/go-remote-io v1.8.0
 	github.com/shouni/go-web-exact/v2 v2.5.2
-	github.com/shouni/netarmor v1.2.0
+	github.com/shouni/netarmor v1.2.1
 	github.com/spf13/cobra v1.10.2
 )
 
