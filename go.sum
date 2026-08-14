@@ -88,8 +88,6 @@ github.com/envoyproxy/protoc-gen-validate v1.3.3 h1:MVQghNeW+LZcmXe7SY1V36Z+WFMD
 github.com/envoyproxy/protoc-gen-validate v1.3.3/go.mod h1:TsndJ/ngyIdQRhMcVVGDDHINPLWB7C82oDArY51KfB0=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
-github.com/forPelevin/gomoji v1.4.1 h1:7U+Bl8o6RV/dOQz7coQFWj/jX6Ram6/cWFOuFDEPEUo=
-github.com/forPelevin/gomoji v1.4.1/go.mod h1:mM6GtmCgpoQP2usDArc6GjbXrti5+FffolyQfGgPboQ=
 github.com/fsouza/fake-gcs-server v1.55.1 h1:8IsUkVFYQnS/QLyci2ORdpn7pkmqs+6hnJ8w51bN7Gg=
 github.com/fsouza/fake-gcs-server v1.55.1/go.mod h1:5XZDg/ZKtY/ciEwJcFRaVz/YQ0FqffGAVTXyyaZZAuA=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
@@ -128,16 +126,12 @@ github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 h1:GFCKgm
 github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10/go.mod h1:t/avpk3KcrXxUnYOhZhMXJlSEyie6gQbtLq5NM3loB8=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
-github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 h1:GHRpF1pTW19a8tTFrMLUcfWwyC0pnifVo2ClaLq+hP8=
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5PCi+MFsC7HjREoAz1BU+Mq60+05gifQSsHSDG/8=
 github.com/shouni/go-http-kit v1.8.0 h1:CWAJ/7mJ6i2q8SAK4iHZvJOIvfQeKIKkcZb0YZVuKGI=
 github.com/shouni/go-http-kit v1.8.0/go.mod h1:EBhrRSrscGl/5J6vG4x/KuEk/W3UelBsj3gg0ycNneM=
 github.com/shouni/go-remote-io v1.8.0 h1:+YbK9w1KIJccF+SzfMJS7odUVyIVd0iSTaQ37MGz+Xc=
 github.com/shouni/go-remote-io v1.8.0/go.mod h1:xlyZSdei+CtCN80OCWl9es7aagglMyCesJubEscyDt4=
-github.com/shouni/go-utils v1.5.0 h1:uYjAMebKGDoZFDBZxugndcyTyaCpmNXd8KgnzueqnOg=
-github.com/shouni/go-utils v1.5.0/go.mod h1:MRR3X08kWJ+sSS2+KRuvWEikXui5Tixg9vta6r30SnE=
 github.com/shouni/netarmor v1.2.0 h1:dubvM231CMkYz6bhYNB29Gp4YA3UnP6Wq0wfwzMFxnI=
 github.com/shouni/netarmor v1.2.0/go.mod h1:WxojUH0M+Z2lqZH2vw572A1zn5l1VkH7V47rnTnZmVY=
 github.com/spiffe/go-spiffe/v2 v2.8.1 h1:eXZMLsu+3MLEPJyGJkolqtVrteZfQdUpOWj6LTiDl/E=

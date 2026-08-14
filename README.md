@@ -171,7 +171,6 @@ Web URL に対しては 2 段階の防御が働きます。
 
 * **[Go Remote IO](https://github.com/shouni/go-remote-io)**: マルチクラウド I/O 抽象化レイヤー。スキームの解釈もこちらに合わせています。
 * **[goquery](https://github.com/PuerkitoBio/goquery)** + `golang.org/x/net/html`: `extract` の DOM 走査。
-* **[Go Utils](https://github.com/shouni/go-utils)**: 抽出テキストの空白正規化（`text.NormalizeText`）。
 * **[Go HTTP Kit](https://github.com/shouni/go-http-kit)**: 既定の HTTP クライアントとレスポンス処理。
 * **[netarmor](https://github.com/shouni/netarmor)**: URL・接続先 IP の安全性検証（SSRF 対策）。
 

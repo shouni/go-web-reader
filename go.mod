@@ -6,7 +6,6 @@ require (
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/shouni/go-http-kit v1.8.0
 	github.com/shouni/go-remote-io v1.8.0
-	github.com/shouni/go-utils v1.5.0
 	github.com/shouni/netarmor v1.2.0
 	golang.org/x/net v0.57.0
 )
@@ -48,7 +47,6 @@ require (
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/forPelevin/gomoji v1.4.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -57,7 +55,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.20 // indirect
 	github.com/googleapis/gax-go/v2 v2.23.0 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.8.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.45.0 // indirect

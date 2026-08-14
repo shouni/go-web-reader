@@ -70,7 +70,9 @@ Anything that adds a selector must decide which of the two lists it belongs to.
 
 - [`go-remote-io`](https://github.com/shouni/go-remote-io) — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, `gcs.New`/`s3.New`).
 - [`goquery`](https://github.com/PuerkitoBio/goquery) + `golang.org/x/net/html` — DOM traversal for `extract`.
-- `go-http-kit` (default client, and the 25MB-capped `HandleResponse`), `go-utils` (`text.NormalizeText`), `netarmor` (`securenet.ValidateURL`).
+- `go-http-kit` (default client, and the 25MB-capped `HandleResponse`), `netarmor` (`securenet.ValidateURL`).
+
+`extract` deliberately depends on nothing but goquery and the stdlib. Whitespace normalization used to come from `go-utils/text.NormalizeText`, which is a one-line `strings.Join(strings.Fields(s), " ")` but drags gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. It now lives here as `normalizeSpace`. Keep it that way unless a helper earns its dependency.
 
 ## History
 

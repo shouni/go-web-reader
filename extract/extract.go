@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/shouni/go-utils/text"
 	"golang.org/x/net/html"
 )
 
@@ -139,7 +138,7 @@ func findMainContent(doc *goquery.Document) *goquery.Selection {
 
 // processGeneralElement は一般的なテキスト要素からテキストを抽出し、整形します。
 func processGeneralElement(s *goquery.Selection) string {
-	content := text.NormalizeText(ownText(s))
+	content := normalizeSpace(ownText(s))
 	if content == "" {
 		return ""
 	}
@@ -191,6 +190,12 @@ func ownText(s *goquery.Selection) string {
 	return builder.String()
 }
 
+// normalizeSpace は連続する空白（改行やタブを含む）を単一のスペースにまとめ、
+// 前後の空白を落とします。HTML のインデントがそのまま本文に出るのを防ぎます。
+func normalizeSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // processTable は goquery.Selection からテーブルの内容を抽出し、整形します。
 func processTable(s *goquery.Selection) string {
 	var tableContent []string
@@ -202,7 +207,7 @@ func processTable(s *goquery.Selection) string {
 		var rowTexts []string
 		hasValue := false
 		row.Find("th, td").Each(func(_ int, cell *goquery.Selection) {
-			cellText := text.NormalizeText(cell.Text())
+			cellText := normalizeSpace(cell.Text())
 			if cellText != "" {
 				hasValue = true
 			}
