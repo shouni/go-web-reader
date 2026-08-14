@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/shouni/go-remote-io/remoteio"
-	"github.com/shouni/go-web-exact/v2/ports"
 )
 
 // --- Stubs ---
@@ -22,27 +21,20 @@ import (
 var (
 	_ remoteio.InputReader = (*stubReader)(nil)
 	_ remoteio.IOFactory   = (*stubFactory)(nil)
-	_ ports.Extractor      = (*stubExtractor)(nil)
+	_ Extractor            = (*stubExtractor)(nil)
 	_ HTTPClient           = (*stubHTTPClient)(nil)
+	_ HTTPClient           = (*headerOverridingClient)(nil)
 )
 
 type stubExtractor struct {
 	text          string
 	hasBody       bool
 	err           error
-	lastURL       string
 	extractedBody string
-	fetchCalls    int
 	extractCalls  int
 }
 
-func (s *stubExtractor) FetchAndExtractText(_ context.Context, url string) (string, bool, error) {
-	s.lastURL = url
-	s.fetchCalls++
-	return s.text, s.hasBody, s.err
-}
-
-func (s *stubExtractor) ExtractText(_ context.Context, reader io.Reader) (string, bool, error) {
+func (s *stubExtractor) Extract(_ context.Context, reader io.Reader) (string, bool, error) {
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		return "", false, err
@@ -159,9 +151,6 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 	if got := string(body); got != "hello world" {
 		t.Fatalf("body = %q, want %q", got, "hello world")
 	}
-	if extractor.fetchCalls != 0 {
-		t.Fatalf("extractor.fetchCalls = %d, want 0", extractor.fetchCalls)
-	}
 	if extractor.extractCalls != 1 {
 		t.Fatalf("extractor.extractCalls = %d, want 1", extractor.extractCalls)
 	}
@@ -176,15 +165,12 @@ func TestReadHTTPUsesExtractor(t *testing.T) {
 func TestNewAcceptsDoOnlyHTTPClientWithDefaultExtractor(t *testing.T) {
 	t.Parallel()
 
-	r, err := New(
+	r := New(
 		WithHTTPClient(&stubHTTPClient{}),
 		WithSafeURLValidator(func(context.Context, string) error { return nil }),
 	)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	if r == nil {
-		t.Fatal("New() reader = nil")
+	if r.extractor == nil {
+		t.Fatal("既定の抽出器が設定されていない")
 	}
 }
 
@@ -231,8 +217,8 @@ func TestReadHTTPMalformedContentTypeDoesNotFallbackOnPartialMatch(t *testing.T)
 	if !strings.Contains(err.Error(), "Content-Typeの解析に失敗しました") {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
-		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
 	}
 }
 
@@ -275,8 +261,8 @@ func TestReadHTTPPlainTextReturnsBodyWithoutExtractor(t *testing.T) {
 	if got := string(body); got != "plain body" {
 		t.Fatalf("body = %q, want %q", got, "plain body")
 	}
-	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
-		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
 	}
 }
 
@@ -302,8 +288,8 @@ func TestReadHTTPMarkdownReturnsBodyWithoutExtractor(t *testing.T) {
 	if got := string(body); got != "# Title\n\nmarkdown body" {
 		t.Fatalf("body = %q", got)
 	}
-	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
-		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
 	}
 }
 
@@ -329,8 +315,8 @@ func TestReadHTTPImageReturnsBodyWithoutExtractor(t *testing.T) {
 	if got := string(body); got != "fake-png-bytes" {
 		t.Fatalf("body = %q, want %q", got, "fake-png-bytes")
 	}
-	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
-		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
 	}
 }
 
@@ -350,8 +336,8 @@ func TestReadHTTPUnsupportedContentTypeReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "未対応のContent-Type") {
 		t.Fatalf("Open() error = %v", err)
 	}
-	if extractor.extractCalls != 0 || extractor.fetchCalls != 0 {
-		t.Fatalf("extractor calls = extract:%d fetch:%d, want 0", extractor.extractCalls, extractor.fetchCalls)
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
 	}
 }
 
@@ -466,18 +452,14 @@ func TestNilOptionsAreIgnored(t *testing.T) {
 		{name: "S3 factory", opt: WithS3Factory(nil)},
 		{name: "HTTP client", opt: WithHTTPClient(nil)},
 		{name: "extractor", opt: WithExtractor(nil)},
-		{name: "fetcher", opt: WithFetcher(nil)},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			r, err := New(WithExtractor(&stubExtractor{}), tt.opt)
-			if err != nil {
-				t.Fatalf("New() error = %v", err)
-			}
-			if r.safeURL == nil || r.extractor == nil || r.fetcher == nil {
+			r := New(WithExtractor(&stubExtractor{}), tt.opt)
+			if r.safeURL == nil || r.extractor == nil || r.httpClient == nil {
 				t.Fatal("nil オプションで既定の依存が失われている")
 			}
 			for _, scheme := range []string{remoteio.PrefixGCS, remoteio.PrefixS3} {
@@ -489,16 +471,16 @@ func TestNilOptionsAreIgnored(t *testing.T) {
 	}
 }
 
-// WithFetcher は HTTP 取得処理そのものを差し替えること。
-// WithExtractor は抽出器しか差し替えないため、取得側を差し替える口が別に要ります。
-func TestWithFetcherReplacesHTTPFetching(t *testing.T) {
+// リクエストのヘッダーは WithHTTPClient から差し替えられること。
+// 取得処理そのものを差し替える口（旧 WithFetcher）を持たないぶん、
+// ヘッダーを変えたい利用者はこの経路に頼ります。
+func TestWithHTTPClientCanOverrideRequestHeaders(t *testing.T) {
 	t.Parallel()
 
-	fetcher := &stubFetcher{body: []byte("fetched"), contentType: "text/plain"}
-	r, err := New(WithExtractor(&stubExtractor{}), WithFetcher(fetcher))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	inner := &stubHTTPClient{contentType: "text/plain", body: "fetched"}
+	r := newTestReader(t, &stubExtractor{},
+		WithHTTPClient(&headerOverridingClient{inner: inner, userAgent: "custom-agent"}),
+	)
 
 	stream, err := r.Open(context.Background(), "https://example.com/a.txt")
 	if err != nil {
@@ -513,25 +495,20 @@ func TestWithFetcherReplacesHTTPFetching(t *testing.T) {
 	if got := string(body); got != "fetched" {
 		t.Fatalf("body = %q, want %q", got, "fetched")
 	}
-	if fetcher.lastURI != "https://example.com/a.txt" {
-		t.Fatalf("fetcher.lastURI = %q", fetcher.lastURI)
+	if got := inner.lastReq.Header.Get("User-Agent"); got != "custom-agent" {
+		t.Fatalf("User-Agent = %q, want %q", got, "custom-agent")
 	}
 }
 
-// stubFetcher は ports.Fetcher を満たすスタブです。
-type stubFetcher struct {
-	body        []byte
-	contentType string
-	err         error
-	lastURI     string
+// headerOverridingClient は、既定のヘッダーを上書きしてから委譲するクライアントです。
+type headerOverridingClient struct {
+	inner     HTTPClient
+	userAgent string
 }
 
-func (s *stubFetcher) FetchBytes(_ context.Context, uri string) ([]byte, string, error) {
-	s.lastURI = uri
-	if s.err != nil {
-		return nil, "", s.err
-	}
-	return s.body, s.contentType, nil
+func (c *headerOverridingClient) Do(req *http.Request) (*http.Response, error) {
+	req.Header.Set("User-Agent", c.userAgent)
+	return c.inner.Do(req)
 }
 
 func TestCloseClosesManagedResources(t *testing.T) {
@@ -851,7 +828,7 @@ func TestClassifyMediaType(t *testing.T) {
 	}
 }
 
-func newTestReader(t *testing.T, extractor ports.Extractor, opts ...Option) *UniversalReader {
+func newTestReader(t *testing.T, extractor Extractor, opts ...Option) *UniversalReader {
 	t.Helper()
 
 	baseOpts := []Option{
@@ -860,10 +837,5 @@ func newTestReader(t *testing.T, extractor ports.Extractor, opts ...Option) *Uni
 	}
 	baseOpts = append(baseOpts, opts...)
 
-	reader, err := New(baseOpts...)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	return reader
+	return New(baseOpts...)
 }

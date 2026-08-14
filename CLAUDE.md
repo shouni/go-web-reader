@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Go Web Reader is a Go library + CLI that reads content from a URI regardless of backend — `https://`, `gs://`, and `s3://` are all handled behind a single `Open(ctx, uri)` call. The public API is `pkg/reader`; everything under `internal/` wires that library into the `go-web-reader` CLI binary.
+Go Web Reader is a Go **library** (no CLI, no `main`) that reads content from a URI regardless of backend — `https://`, `gs://`, and `s3://` all go through one `Open(ctx, uri)`. Two public packages:
+
+- `reader` — scheme dispatch, Content-Type handling, GCS/S3 lazy init, DI options.
+- `extract` — HTML main-content extraction. Usable on its own.
+
+Dependency direction is one-way: `reader` → `extract`. Nothing imports `reader`.
 
 ## Commands
 
@@ -13,50 +18,60 @@ go build ./...                       # build everything
 go vet ./...                         # vet
 test -z "$(gofmt -l .)"              # format check (CI fails on any diff)
 go test -race ./...                  # full test suite, as run in CI
-go test -race ./pkg/reader/...       # single package
+go test -race ./reader/...           # single package
 go test -race -run TestName ./...    # single test
-golangci-lint run                    # lint (mirrors .golangci.yml: errcheck, govet, ineffassign, staticcheck, unused, gocritic, revive)
+golangci-lint run                    # lint (.golangci.yml: errcheck, govet, ineffassign, staticcheck, unused, gocritic, revive)
 govulncheck ./...                    # vulnerability scan (also runs in CI)
-
-go run . read --uri https://example.com/article
-go run . read --uri gs://bucket/path/to/file.txt
-go run . read --uri s3://bucket/path/to/file.txt
 ```
 
 CI (`.github/workflows/ci.yml`) runs build/vet/gofmt/`go test -race`, golangci-lint, and govulncheck on every push/PR to `main` and `develop`.
 
-## Architecture
+## Design decisions
 
-### Layering
+Per-function rationale lives in the doc comments; this section covers only what the source cannot say from inside a single file.
 
-```
-cmd/            Cobra CLI (root.go registers --uri flag + PreRunE validation; read.go runs the read subcommand)
-internal/builder    DI: turns a *config.Config into a fully-wired *app.Container
-internal/app        Container holds Config, the Pipeline, and a slice of io.Closer for cleanup
-internal/pipeline   Business logic: depends only on the ContentReader interface, not on pkg/reader directly
-internal/config     Config struct (SourceURL) + Normalize/Validate
-internal/closeutil  closeutil.Join(...) — runs multiple closers, merges errors with errors.Join
-pkg/reader          Public library: UniversalReader, the actual scheme-dispatching implementation
-```
+### Interfaces live with their consumer
 
-Dependency direction: `cmd` → `builder` → `app`/`pipeline`. `internal/pipeline` never imports `pkg/reader` directly — it depends on its own local `ContentReader` interface, and `builder` supplies a `*pkgreader.UniversalReader` that satisfies it. This is what lets `pipeline_test.go` and `container_test.go` run without any real network/storage clients. `app.Container` holds `*pipeline.Pipeline` directly: the implementation is the only one and nobody swaps it, so an interface in between bought nothing — the seam that matters is `ContentReader`, one level in.
+There is no shared `ports`/`types` package. `reader` declares the `HTTPClient` and `Extractor` interfaces it consumes; `extract` takes a plain `io.Reader` and names no type from `reader`. That is what keeps the dependency one-way — a shared interface package would let the two entangle. `extract.Engine` satisfies `reader.Extractor` structurally.
 
-`Pipeline.Execute(ctx, w io.Writer) error` streams straight from the `io.ReadCloser` into the writer instead of returning a string. `cmd/read.go` passes stdout, so a `gs://` file of any size costs one copy buffer, and stdout carries only the fetched bytes — headings and separators go to stderr so `read -u ... > out.txt` and pipes stay usable.
+### extract does no I/O
 
-### pkg/reader (the actual engine)
+`extract.Text(ctx, io.Reader)` is the whole engine; `extract.Engine` is an empty struct that forwards to it, existing only so `WithExtractor` has an interface value to accept. It is deliberately *not* named `Extractor`: that name belongs to the `reader` interface, and having both would put two different `Extractor` types in one codebase. The zero value works, so there is no constructor and no init error — which in turn is why `reader.New` returns no error.
 
-- `reader.New(opts ...Option)` does a *lightweight* init only. GCS/S3 clients are lazily constructed on first `Open()` call for that scheme, cached in `storageReaderCache`, and released together on `Close()` via `closeutil.Join`.
-- `Open(ctx, uri)` dispatches on scheme: `http(s)://` → `http.go`, otherwise `remoteio.SchemePrefix(uri)` is looked up in the `storages` map (`remoteio.PrefixGCS` / `PrefixS3` → `storage.go`). Adding a scheme means one more map entry in `New`; it used to mean touching the struct, `New`, `Open` and `Close`. Every URI is passed through `securenet.ValidateURL` before anything else runs.
-- `http.go`: fetches via `HTTPClient` (defaults to `httpkit.New`), then branches on the response `Content-Type`. The `mediaKinds` table is the single source of truth for what is supported: `text/html`/`application/xhtml+xml` map to `mediaKindHTML` and go through the `go-web-exact` extractor (`openExtractedHTML`) to strip boilerplate and return body text only; `text/plain`/`text/markdown`/`text/x-markdown` and any `image/*` map to `mediaKindPassthrough` and are streamed back unmodified; anything else is an error. Add a new supported Content-Type by editing that table alone — `classifyMediaType` drives both the dispatch switch and the malformed-header fallback. `resolveMediaType` parses the header and, when it is not RFC-compliant (e.g. an unclosed `charset="`), falls back to the substring before `;` but only accepts it if it is already a known media type.
-- `storage.go`: GCS/S3 readers are built from `remoteio.IOFactory` and cached per-scheme in a `storageReaderCache`, which carries its own `label`, `newFactory` and `sync.Mutex`. The lock is per-cache rather than shared on `UniversalReader` on purpose: factory construction does real I/O (credential resolution), so a shared lock would let a slow GCS init block S3 `Open` and `Close`. **`Close` is terminal**: the cached `remoteio.Reader`/`io.Closer` pair is reused until `Close()`, after which `Open` returns `ErrClosed`. It used to silently re-initialize, so a reader someone had closed would quietly build a new GCS client.
-- `options.go` exposes `With*` functional options (`WithExtractor`, `WithFetcher`, `WithHTTPClient`, `WithSafeURLValidator`, `WithGCSFactory`, `WithS3Factory`) — this is the seam tests and embedding applications use to swap out real network/cloud dependencies for fakes. Defaults live in `newOptions`, and every option ignores a nil value, so a required dependency can never end up nil; `New` no longer re-checks fields it just defaulted. `WithExtractor` swaps only the extraction engine — use `WithFetcher` to replace HTTP fetching itself.
+This is a deliberate narrowing from the `go-web-exact` version this was absorbed from, which held a `Fetcher` purely to serve a `FetchAndExtractText(ctx, url)` convenience method. Fetching belongs to `reader`. **Do not reintroduce network access into `extract`.**
 
-### Resource cleanup convention
+### One HTTP seam, not two
 
-Anything that opens external resources (HTTP client, GCS/S3 factories, the reader itself) is collected as an `io.Closer` and released through `closeutil.Join`, which runs every closer and merges errors with `errors.Join` rather than stopping at the first failure or silently dropping errors. Follow this pattern for any new resource that needs cleanup — don't `defer resource.Close()` and ignore the error; register it as a closer instead (see `internal/app.Container.Closers` and `UniversalReader.Close`).
+`WithHTTPClient` is the only way to change how fetching happens. There used to be a second seam — a `Fetcher` interface plus `WithFetcher` that replaced the whole fetch step — and it was removed because it had no users and no capability of its own: a custom `HTTPClient.Do` can rewrite the `*http.Request` (headers included) before delegating, which covers the case `WithFetcher` was there for. Removing it also let every default move into `newOptions`; the `Fetcher` default could not live there because it depended on `cfg.httpClient`.
+
+Don't reintroduce it without a concrete requirement that `WithHTTPClient` genuinely cannot serve. Note that `httpkit.HandleResponse` — and therefore the 25MB response cap — is applied by `fetchBytes` outside the client, so a swapped client cannot lose it; a `Fetcher` seam could.
+
+### Two selector lists, removed at different times
+
+`extract` removes `noiseSelectors` (script/style/form/nav/aside/ad-ish classes) from the whole document *before* choosing the main content, so an `<article>` nested inside an `<aside>` cannot be mistaken for the body. `pageFrameSelectors` (header/footer/.sidebar) is removed *only* on the fallback path, because inside a real article a `<header>` usually holds the `<h1>` and a `<footer>` the byline — dropping those unconditionally loses body text.
+
+Anything that adds a selector must decide which of the two lists it belongs to.
+
+### Nested blocks are emitted once
+
+`Find(blockSelectors)` visits a parent and its matching descendants both (goquery dedupes *nodes*, not nested text). `ownText` is what prevents `<li><p>…</p></li>` from printing the same sentence twice: it refuses to descend into any child that is itself in `blockSelectors`, because that child gets its own visit. If you extend `blockSelectors`, this keeps working automatically — the two use the same constant on purpose.
+
+### Length thresholds are counted in runes
+
+`len()` would measure bytes, making the thresholds effectively one third for Japanese text and letting navigation fragments through. `MinHeadingLength` is 2 rather than 3 so that two-character headings (`概要`) survive. `<li>` is exempt from the paragraph threshold — list items are legitimately short.
+
+## Conventions
+
+- **Cleanup**: `Close` runs *every* closer and merges failures with `errors.Join`; it never stops at the first error or drops one. Don't `defer resource.Close()` and ignore the result.
+- **Content-Type support** is the `mediaKinds` table in `reader/http.go` alone — `classifyMediaType` drives both the dispatch switch and the malformed-header fallback, so adding a type means editing that table and nothing else.
+- **Scheme parsing** is borrowed from `remoteio.SchemePrefix` rather than reimplemented, so the two libraries cannot disagree on where a scheme ends. Adding a scheme means one more entry in the `storages` map in `reader.New`.
 
 ## Key dependencies
 
-- [`go-web-exact`](https://github.com/shouni/go-web-exact) — the main-content extraction engine used for HTML.
-- [`go-remote-io`](https://github.com/shouni/go-remote-io) — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, and the `gcs.New`/`s3.New` factories). Scheme parsing is deliberately borrowed rather than reimplemented, so the two libraries cannot disagree on where a scheme ends.
-- `go-http-kit`, `netarmor` (URL safety validation via `securenet.ValidateURL`), `clibase` (CLI bootstrapping used in `cmd/root.go`).
+- [`go-remote-io`](https://github.com/shouni/go-remote-io) — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, `gcs.New`/`s3.New`).
+- [`goquery`](https://github.com/PuerkitoBio/goquery) + `golang.org/x/net/html` — DOM traversal for `extract`.
+- `go-http-kit` (default client, and the 25MB-capped `HandleResponse`), `go-utils` (`text.NormalizeText`), `netarmor` (`securenet.ValidateURL`).
+
+## History
+
+`extract` was absorbed from [`go-web-exact`](https://github.com/shouni/go-web-exact) v2.5.2, now retired. Its `scraper`/`runner`/`builder` packages (parallel fetching with rate limiting, retries, HTML worker pool) were **not** brought over — they had no users. If bulk scraping is needed again, recover them from that repo's `v2.5.2` tag rather than rewriting, and note that `scraper` fetched without going through `SafeURLValidator`: anything reintroduced here must go through it.
