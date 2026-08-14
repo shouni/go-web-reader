@@ -169,11 +169,12 @@ Web URL に対しては 2 段階の防御が働きます。
 
 ## 🛠️ 主要な依存関係 (Dependencies)
 
-`go.mod` の直接依存はこの 5 つだけです（並びも `require` ブロックと同じ）。
+`go.mod` の直接依存はこの 6 つだけです（並びも `require` ブロックと同じ）。
 
 | モジュール | 役割 |
 | :--- | :--- |
 | [`github.com/PuerkitoBio/goquery`](https://github.com/PuerkitoBio/goquery) | `extract` の DOM 走査 |
+| [`github.com/andybalholm/cascadia`](https://github.com/andybalholm/cascadia) | CSS セレクタの事前コンパイル（goquery の内部エンジン） |
 | [`github.com/shouni/go-http-kit`](https://github.com/shouni/go-http-kit) | 既定の HTTP クライアントとレスポンス処理（25MB 上限） |
 | [`github.com/shouni/go-remote-io`](https://github.com/shouni/go-remote-io) | GCS/S3 の I/O 抽象化。スキームの解釈もこちらに合わせています |
 | [`github.com/shouni/netarmor`](https://github.com/shouni/netarmor) | URL・接続先 IP の安全性検証（SSRF 対策） |

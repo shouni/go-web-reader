@@ -54,7 +54,15 @@ Anything that adds a selector must decide which of the two lists it belongs to.
 
 ### Nested blocks are emitted once
 
-`Find(blockSelectors)` visits a parent and its matching descendants both (goquery dedupes *nodes*, not nested text). `ownText` is what prevents `<li><p>…</p></li>` from printing the same sentence twice: it refuses to descend into any child that is itself in `blockSelectors`, because that child gets its own visit. If you extend `blockSelectors`, this keeps working automatically — the two use the same constant on purpose.
+`FindMatcher(blockMatcher)` visits a parent and its matching descendants both (goquery dedupes *nodes*, not nested text). `writeOwnText` is what prevents `<li><p>…</p></li>` from printing the same sentence twice: it refuses to descend into any child whose tag is in `blockTagSet`, because that child gets its own visit.
+
+`blockMatcher` and `blockTagSet` are both derived from the `blockTags` slice, so extending the element list in that one place keeps the two in step. Don't hardcode either of them.
+
+### Selectors are compiled once, and tag checks skip CSS entirely
+
+goquery's string-taking `Find`/`Is` call `cascadia.Compile` on **every** call — there is no cache. That is fine for a once-per-document query and wasteful for a per-node one, so every selector here is a package-level `cascadia.MustCompile` used through `FindMatcher`/`IsMatcher`.
+
+Beyond that, single-tag tests don't need the CSS machinery at all: `tagName` reads `html.Node.Data` directly, and `writeOwnText` walks `FirstChild`/`NextSibling` rather than `Contents().Each`, which allocates a `Selection` per child. Together those cut ~40% of the run time and ~68% of the allocations on a 100-section article (`go test -bench BenchmarkText ./extract/`). Keep new per-node checks off the string API.
 
 ### Length thresholds are counted in runes
 
@@ -68,15 +76,16 @@ Anything that adds a selector must decide which of the two lists it belongs to.
 
 ## Key dependencies
 
-Five direct requires, listed in `go.mod` order:
+Six direct requires, listed in `go.mod` order:
 
 - `github.com/PuerkitoBio/goquery` — DOM traversal for `extract`.
+- `github.com/andybalholm/cascadia` — goquery's own selector engine, used directly to precompile selectors (see below).
 - `github.com/shouni/go-http-kit` — the default client (`httpkit.New`) and `HandleResponse`, which is where the 25MB response cap comes from.
 - `github.com/shouni/go-remote-io` — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, `gcs.New`/`s3.New`).
 - `github.com/shouni/netarmor` — `securenet.ValidateURL` and the scheme constants.
 - `golang.org/x/net` — `html` node types, used by `extract`'s text walk.
 
-`extract` deliberately depends on nothing but goquery, `x/net/html` and the stdlib. Whitespace normalization used to come from `go-utils/text.NormalizeText`, which is a one-line `strings.Join(strings.Fields(s), " ")` but drags gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. It now lives here as `normalizeSpace`. Keep it that way unless a helper earns its dependency.
+`extract` deliberately depends on nothing but goquery, cascadia, `x/net/html` and the stdlib — and the first two are the same dependency, since goquery already requires cascadia. Whitespace normalization used to come from `go-utils/text.NormalizeText`, which is a one-line `strings.Join(strings.Fields(s), " ")` but drags gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. It now lives here as `normalizeSpace`. Keep it that way unless a helper earns its dependency.
 
 ## History
 

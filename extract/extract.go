@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/andybalholm/cascadia"
 	"golang.org/x/net/html"
 )
 
@@ -37,15 +38,53 @@ const (
 	// 見出しを、<footer> が署名を持つことがあり、常に落とすと本文が欠けるためです。
 	pageFrameSelectors = "header, footer, .sidebar"
 
-	// blockSelectors は走査対象のブロック要素です。
-	// この一覧は processGeneralElement の入れ子スキップ判定にも使われます。
-	blockSelectors = "p, h1, h2, h3, h4, h5, h6, li, blockquote, table, pre"
-
-	headingSelectors = "h1, h2, h3, h4, h5, h6"
-
 	titlePrefix        = "【記事タイトル】 "
 	tableCaptionPrefix = "【表題】 "
 )
+
+// blockTags は走査対象のブロック要素です。走査用のセレクタと ownText の
+// 入れ子スキップ判定の両方をここから導出するので、一覧はこの 1 箇所だけです。
+var blockTags = []string{"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "table", "pre"}
+
+var headingTags = []string{"h1", "h2", "h3", "h4", "h5", "h6"}
+
+// セレクタは起動時に 1 度だけコンパイルします。goquery の Find/Is は
+// 文字列を受け取るたびに cascadia.Compile を呼び直すため、ノードごとに
+// 判定する箇所でそのまま使うと、走査のたびにセレクタを解析し直すことになります。
+var (
+	blockMatcher       = cascadia.MustCompile(strings.Join(blockTags, ", "))
+	mainContentMatcher = cascadia.MustCompile(mainContentSelectors)
+	noiseMatcher       = cascadia.MustCompile(noiseSelectors)
+	pageFrameMatcher   = cascadia.MustCompile(pageFrameSelectors)
+	titleMatcher       = cascadia.MustCompile("title")
+	bodyMatcher        = cascadia.MustCompile("body")
+	captionMatcher     = cascadia.MustCompile("caption")
+	rowMatcher         = cascadia.MustCompile("tr")
+	cellMatcher        = cascadia.MustCompile("th, td")
+
+	blockTagSet   = newTagSet(blockTags)
+	headingTagSet = newTagSet(headingTags)
+)
+
+func newTagSet(tags []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		set[tag] = struct{}{}
+	}
+	return set
+}
+
+// tagName は要素ノードのタグ名を返します。要素でなければ空文字列です。
+//
+// 単一タグの判定にセレクタを使わないのは、CSS の照合機構を通さずとも
+// html.Node のタグ名を直接見れば足りるためです。
+func tagName(s *goquery.Selection) string {
+	node := s.Get(0)
+	if node == nil || node.Type != html.ElementNode {
+		return ""
+	}
+	return node.Data
+}
 
 // Engine は状態を持たない抽出エンジンです。ゼロ値のまま使えます。
 //
@@ -81,25 +120,25 @@ func extractContentText(doc *goquery.Document) (text string, hasBodyFound bool, 
 	var parts []string
 
 	// タイトルは <head> にあるため、本文の絞り込みより先に取ります。
-	pageTitle := strings.TrimSpace(doc.Find("title").First().Text())
+	pageTitle := strings.TrimSpace(doc.FindMatcher(titleMatcher).First().Text())
 	if pageTitle != "" {
 		parts = append(parts, titlePrefix+pageTitle)
 	}
 
 	// ノイズは本文候補を決める前にページ全体から落とします。あとから落とすと、
 	// <aside> の中の <article> を本文として選んでしまう余地が残ります。
-	doc.Find(noiseSelectors).Remove()
+	doc.FindMatcher(noiseMatcher).Remove()
 
 	// ブロック要素は DOM の出現順（深さ優先）に一度ずつ訪問されます。入れ子の
 	// 親子が両方一致した場合は両方が訪問されるため、二重に出さない責任は
 	// processGeneralElement 側にあります。
-	findMainContent(doc).Find(blockSelectors).Each(func(_ int, s *goquery.Selection) {
+	findMainContent(doc).FindMatcher(blockMatcher).Each(func(_ int, s *goquery.Selection) {
 		var content string
 
-		switch {
-		case s.Is("table"):
+		switch tagName(s) {
+		case "table":
 			content = processTable(s)
-		case s.Is("pre"):
+		case "pre":
 			// pre タグ (コードブロック) はコードフェンスで囲む
 			if preText := strings.TrimSpace(s.Text()); preText != "" {
 				content = "```\n" + preText + "\n```"
@@ -119,7 +158,7 @@ func extractContentText(doc *goquery.Document) (text string, hasBodyFound bool, 
 
 // findMainContent は本文が入っている範囲を返します。
 func findMainContent(doc *goquery.Document) *goquery.Selection {
-	if mainContent := doc.Find(mainContentSelectors).First(); mainContent.Length() > 0 {
+	if mainContent := doc.FindMatcher(mainContentMatcher).First(); mainContent.Length() > 0 {
 		return mainContent
 	}
 
@@ -127,11 +166,11 @@ func findMainContent(doc *goquery.Document) *goquery.Selection {
 	// goquery の Not は「選択中のノード自身」を絞り込むだけで子孫には効かないため、
 	// 以前の doc.Not(...) はドキュメントノードをそのまま返すだけで何も除外できておらず、
 	// ナビゲーションやフッターのリンクが <li> として本文に混ざっていました。
-	body := doc.Find("body").First()
+	body := doc.FindMatcher(bodyMatcher).First()
 	if body.Length() == 0 {
 		body = doc.Selection
 	}
-	body.Find(pageFrameSelectors).Remove()
+	body.FindMatcher(pageFrameMatcher).Remove()
 
 	return body
 }
@@ -143,7 +182,8 @@ func processGeneralElement(s *goquery.Selection) string {
 		return ""
 	}
 
-	if s.Is(headingSelectors) {
+	tag := tagName(s)
+	if _, isHeading := headingTagSet[tag]; isHeading {
 		if utf8.RuneCountInString(content) >= MinHeadingLength {
 			return "## " + content
 		}
@@ -151,7 +191,7 @@ func processGeneralElement(s *goquery.Selection) string {
 	}
 
 	// リスト項目は短くても項目として意味を持つため、長さで落としません。
-	if s.Is("li") || utf8.RuneCountInString(content) >= MinParagraphLength {
+	if tag == "li" || utf8.RuneCountInString(content) >= MinParagraphLength {
 		return content
 	}
 	return ""
@@ -164,30 +204,30 @@ func processGeneralElement(s *goquery.Selection) string {
 // 親と子の両方が同じ文を出力し、本文が二重になります。
 func ownText(s *goquery.Selection) string {
 	var builder strings.Builder
-
-	var walk func(sel *goquery.Selection)
-	walk = func(sel *goquery.Selection) {
-		sel.Contents().Each(func(_ int, child *goquery.Selection) {
-			node := child.Get(0)
-			if node == nil {
-				return
-			}
-
-			switch node.Type {
-			case html.TextNode:
-				builder.WriteString(node.Data)
-			case html.ElementNode:
-				if child.Is(blockSelectors) {
-					return
-				}
-				walk(child)
-			}
-			// コメントノードやDOCTYPEなどは無視
-		})
+	for _, node := range s.Nodes {
+		writeOwnText(&builder, node)
 	}
-	walk(s)
-
 	return builder.String()
+}
+
+// writeOwnText は n の子孫のテキストを、ブロック要素の内側を除いて builder に書き出します。
+//
+// goquery を介さず html.Node を直接辿ります。Contents().Each(...) は子ノードごとに
+// Selection を確保するうえ、Is(セレクタ文字列) はノードごとにセレクタを
+// コンパイルし直すため、文書全体を歩くこの経路では割に合いません。
+func writeOwnText(builder *strings.Builder, n *html.Node) {
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		switch child.Type {
+		case html.TextNode:
+			builder.WriteString(child.Data)
+		case html.ElementNode:
+			if _, isBlock := blockTagSet[child.Data]; isBlock {
+				continue
+			}
+			writeOwnText(builder, child)
+		}
+		// コメントノードやDOCTYPEなどは無視
+	}
 }
 
 // normalizeSpace は連続する空白（改行やタブを含む）を単一のスペースにまとめ、
@@ -199,14 +239,14 @@ func normalizeSpace(s string) string {
 // processTable は goquery.Selection からテーブルの内容を抽出し、整形します。
 func processTable(s *goquery.Selection) string {
 	var tableContent []string
-	captionText := strings.TrimSpace(s.Find("caption").First().Text())
+	captionText := strings.TrimSpace(s.FindMatcher(captionMatcher).First().Text())
 	if captionText != "" {
 		tableContent = append(tableContent, tableCaptionPrefix+captionText)
 	}
-	s.Find("tr").Each(func(_ int, row *goquery.Selection) {
+	s.FindMatcher(rowMatcher).Each(func(_ int, row *goquery.Selection) {
 		var rowTexts []string
 		hasValue := false
-		row.Find("th, td").Each(func(_ int, cell *goquery.Selection) {
+		row.FindMatcher(cellMatcher).Each(func(_ int, cell *goquery.Selection) {
 			cellText := normalizeSpace(cell.Text())
 			if cellText != "" {
 				hasValue = true
