@@ -2,15 +2,22 @@ package reader
 
 import (
 	"context"
+	"io"
 	"net/http"
 
 	"github.com/shouni/go-http-kit/httpkit"
 	"github.com/shouni/go-remote-io/remoteio"
 	"github.com/shouni/go-remote-io/remoteio/gcs"
 	"github.com/shouni/go-remote-io/remoteio/s3"
-	"github.com/shouni/go-web-exact/v2/ports"
+	"github.com/shouni/go-web-reader/extract"
 	"github.com/shouni/netarmor/securenet"
 )
+
+// Extractor は取得済みの HTML から本文テキストを抽出します。
+// 第2戻り値は本文が見つかったかどうかです。
+type Extractor interface {
+	Extract(ctx context.Context, r io.Reader) (text string, hasBody bool, err error)
+}
 
 // SafeURLValidator は URI の安全性を検証します。安全な場合は nil を返します。
 // 名前解決を伴うため context を受け取ります。
@@ -26,8 +33,7 @@ type HTTPClient interface {
 }
 
 type options struct {
-	extractor     ports.Extractor
-	fetcher       ports.Fetcher
+	extractor     Extractor
 	httpClient    HTTPClient
 	safeURL       SafeURLValidator
 	newGCSFactory StorageFactory
@@ -36,10 +42,8 @@ type options struct {
 
 // newOptions は既定値にオプションを適用した設定を返します。
 //
-// nil のオプション値は無視します。各 With* が既定値を上書きしない限り、
-// 設定が nil になる経路はありません。以前は New 側で「既定値が入っているはずの
-// フィールドが nil でないか」を検証していましたが、明示的に nil を渡したときにしか
-// 到達しない分岐でした。防ぐべきものを入口で防ぐ形に寄せています。
+// 各 With* は nil の値を無視するため、設定フィールドが nil になる経路はありません。
+// New 側で改めて nil を検査しないのはこのためです。
 func newOptions(opts ...Option) options {
 	cfg := options{
 		// securenet.ValidateURL は可変長オプションを取るため、そのままでは
@@ -47,6 +51,7 @@ func newOptions(opts ...Option) options {
 		safeURL: func(ctx context.Context, uri string) error {
 			return securenet.ValidateURL(ctx, uri)
 		},
+		extractor:     extract.Engine{},
 		httpClient:    httpkit.New(httpkit.DefaultHTTPTimeout),
 		newGCSFactory: func(ctx context.Context) (remoteio.IOFactory, error) { return gcs.New(ctx) },
 		newS3Factory:  func(ctx context.Context) (remoteio.IOFactory, error) { return s3.New(ctx) },
@@ -63,8 +68,8 @@ func newOptions(opts ...Option) options {
 type Option func(*options)
 
 // WithExtractor はテキスト抽出器を差し替えます。
-// HTTP の取得そのものは差し替わりません（そちらは WithFetcher / WithHTTPClient）。
-func WithExtractor(extractor ports.Extractor) Option {
+// HTTP の取得そのものは差し替わりません（そちらは WithHTTPClient）。
+func WithExtractor(extractor Extractor) Option {
 	return func(o *options) {
 		if extractor != nil {
 			o.extractor = extractor
@@ -72,20 +77,10 @@ func WithExtractor(extractor ports.Extractor) Option {
 	}
 }
 
-// WithFetcher は HTTP(S) の取得処理を差し替えます。
-//
-// WithHTTPClient がクライアントだけを差し替えるのに対し、こちらは取得処理そのもの
-// （リクエスト組み立て・レスポンス処理を含む）を置き換えます。既定の抽出器を使う場合、
-// 抽出器にも同じ Fetcher が渡ります。
-func WithFetcher(fetcher ports.Fetcher) Option {
-	return func(o *options) {
-		if fetcher != nil {
-			o.fetcher = fetcher
-		}
-	}
-}
-
 // WithHTTPClient は HTTP(S) の取得に使うクライアントを差し替えます。
+//
+// リクエストのヘッダーを変えたい場合もここです。Do の中で受け取った
+// *http.Request のヘッダーを上書きしてから元のクライアントに委譲できます。
 func WithHTTPClient(client HTTPClient) Option {
 	return func(o *options) {
 		if client != nil {
