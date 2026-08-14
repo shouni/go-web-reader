@@ -76,8 +76,6 @@ Beyond that, single-tag tests don't need the CSS machinery at all: `tagName` rea
 
 ## Key dependencies
 
-Six direct requires, listed in `go.mod` order:
-
 - `github.com/PuerkitoBio/goquery` — DOM traversal for `extract`.
 - `github.com/andybalholm/cascadia` — goquery's own selector engine, used directly to precompile selectors (see below).
 - `github.com/shouni/go-http-kit` — the default client (`httpkit.New`) and `HandleResponse`, which is where the 25MB response cap comes from.

@@ -169,8 +169,6 @@ Web URL に対しては 2 段階の防御が働きます。
 
 ## 🛠️ 主要な依存関係 (Dependencies)
 
-`go.mod` の直接依存はこの 6 つだけです（並びも `require` ブロックと同じ）。
-
 | モジュール | 役割 |
 | :--- | :--- |
 | [`github.com/PuerkitoBio/goquery`](https://github.com/PuerkitoBio/goquery) | `extract` の DOM 走査 |
@@ -179,8 +177,6 @@ Web URL に対しては 2 段階の防御が働きます。
 | [`github.com/shouni/go-remote-io`](https://github.com/shouni/go-remote-io) | GCS/S3 の I/O 抽象化。スキームの解釈もこちらに合わせています |
 | [`github.com/shouni/netarmor`](https://github.com/shouni/netarmor) | URL・接続先 IP の安全性検証（SSRF 対策） |
 | [`golang.org/x/net`](https://pkg.go.dev/golang.org/x/net) | `html` パッケージ。`extract` のテキストノード走査に使用 |
-
-バージョンは `go.mod` が正なので、ここには書きません（dependabot で随時上がるため）。
 
 -----
 
