@@ -47,18 +47,14 @@ func classifyMediaType(mediaType string) mediaKind {
 	return mediaKindUnsupported
 }
 
-type httpClientFetcher struct {
-	client HTTPClient
-}
-
-// FetchBytes は HTTPClient を go-web-exact の ports.Fetcher として使うためのアダプタです。
-func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, string, error) {
+// fetchBytes は URI を GET し、ボディと Content-Type を返します。
+func (r *UniversalReader) fetchBytes(ctx context.Context, uri string) ([]byte, string, error) {
 	req, err := newHTTPRequest(ctx, uri)
 	if err != nil {
 		return nil, "", err
 	}
 
-	resp, err := f.client.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("HTTPリクエスト失敗: %w", err)
 	}
@@ -72,10 +68,10 @@ func (f httpClientFetcher) FetchBytes(ctx context.Context, uri string) ([]byte, 
 }
 
 // openHTTP は HTTP(S) URI を Content-Type ごとに処理して読み取りストリームを返します。
-// フェッチは httpClientFetcher.FetchBytes に一本化しており、レスポンスサイズの上限
-// （httpkit.HandleResponse による）がHTML以外のコンテンツタイプにも一貫して適用されます。
+// 取得は Content-Type によらず fetchBytes に一本化しているため、
+// httpkit.HandleResponse のレスポンスサイズ上限がどの Content-Type にも等しくかかります。
 func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadCloser, error) {
-	body, rawContentType, err := r.fetcher.FetchBytes(ctx, uri)
+	body, rawContentType, err := r.fetchBytes(ctx, uri)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +118,7 @@ func newHTTPRequest(ctx context.Context, uri string) (*http.Request, error) {
 // openExtractedHTML は取得済み HTML から本文テキストを抽出して読み取りストリームを返します。
 // body は取得済みバイト列を読むだけなので、クローズは不要です。
 func (r *UniversalReader) openExtractedHTML(ctx context.Context, uri string, body io.Reader) (io.ReadCloser, error) {
-	text, hasBody, err := r.extractor.ExtractText(ctx, body)
+	text, hasBody, err := r.extractor.Extract(ctx, body)
 	if err != nil {
 		return nil, err
 	}

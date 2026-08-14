@@ -4,22 +4,20 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/shouni/go-remote-io/remoteio"
-	"github.com/shouni/go-web-exact/v2/extract"
-	"github.com/shouni/go-web-exact/v2/ports"
-	"github.com/shouni/go-web-reader/internal/closeutil"
 	"github.com/shouni/netarmor/securenet"
 )
 
 // UniversalReader は URI の種類に応じて読み取りストリームを返します。
 type UniversalReader struct {
-	extractor ports.Extractor
-	fetcher   ports.Fetcher
-	safeURL   SafeURLValidator
+	extractor  Extractor
+	httpClient HTTPClient
+	safeURL    SafeURLValidator
 	// storages はスキームのプレフィックスをキーにしたストレージリーダーです。
 	// スキームを増やすときに触るのがこのマップの組み立てだけで済むよう、
 	// フィールドに直書きしていません（以前は追加のたびに構造体・New・Open・Close の
@@ -28,32 +26,21 @@ type UniversalReader struct {
 }
 
 // New は UniversalReader の新しいインスタンスを生成します。
-func New(opts ...Option) (*UniversalReader, error) {
+//
+// エラーを返さないのは、ここで確立する外部接続がないためです。GCS/S3 の
+// クライアントは対象スキームの初回 Open まで作られず、失敗するとしたらそちらです。
+func New(opts ...Option) *UniversalReader {
 	cfg := newOptions(opts...)
 
-	fetcher := cfg.fetcher
-	if fetcher == nil {
-		fetcher = httpClientFetcher{client: cfg.httpClient}
-	}
-
-	extractor := cfg.extractor
-	if extractor == nil {
-		built, err := extract.NewExtractor(fetcher)
-		if err != nil {
-			return nil, fmt.Errorf("extractorの初期化エラー: %w", err)
-		}
-		extractor = built
-	}
-
 	return &UniversalReader{
-		extractor: extractor,
-		fetcher:   fetcher,
-		safeURL:   cfg.safeURL,
+		extractor:  cfg.extractor,
+		httpClient: cfg.httpClient,
+		safeURL:    cfg.safeURL,
 		storages: map[string]*storageReaderCache{
 			remoteio.PrefixGCS: {label: "GCS", newFactory: cfg.newGCSFactory},
 			remoteio.PrefixS3:  {label: "S3", newFactory: cfg.newS3Factory},
 		},
-	}, nil
+	}
 }
 
 // Open は URI のスキームを判別し、適切な読み取りストリームを返します。
@@ -68,7 +55,10 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 		return nil, fmt.Errorf("URL安全性検証に失敗しました: %w", err)
 	}
 
-	if strings.HasPrefix(uri, securenet.SchemeHTTP) || strings.HasPrefix(uri, securenet.SchemeHTTPS) {
+	// securenet の定数はスキーム名だけ（"http" / "https"）なので "://" まで見ます。
+	// スキーム名だけで前方一致すると "https://" は "http" にも一致して第 2 条件が
+	// 死ぬうえ、"httpfoo://" のような別スキームまで HTTP 扱いになります。
+	if strings.HasPrefix(uri, securenet.SchemeHTTP+"://") || strings.HasPrefix(uri, securenet.SchemeHTTPS+"://") {
 		return r.openHTTP(ctx, uri)
 	}
 	// スキームの取り出しは go-remote-io と同じ関数を使います。自前で判定を書くと、
@@ -81,17 +71,20 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 }
 
 // Close は内部で保持している外部リソースを解放します。
-// スキームごとに独立してロックするため、片方の解放がもう片方を待たせることはありません。
 // Close は終端です。解放後の Open は ErrClosed を返します。
 func (r *UniversalReader) Close() error {
 	if r == nil {
 		return nil
 	}
 
-	fns := make([]func() error, 0, len(r.storages))
+	// 最初の失敗で打ち切らず全部閉じます。片方の解放失敗で
+	// もう片方を閉じ損ねると、そちらの接続が残ります。
+	var errs []error
 	for _, cache := range r.storages {
-		fns = append(fns, cache.close)
+		if err := cache.close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	return closeutil.Join(fns...)
+	return errors.Join(errs...)
 }
