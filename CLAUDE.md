@@ -68,11 +68,15 @@ Anything that adds a selector must decide which of the two lists it belongs to.
 
 ## Key dependencies
 
-- [`go-remote-io`](https://github.com/shouni/go-remote-io) — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, `gcs.New`/`s3.New`).
-- [`goquery`](https://github.com/PuerkitoBio/goquery) + `golang.org/x/net/html` — DOM traversal for `extract`.
-- `go-http-kit` (default client, and the 25MB-capped `HandleResponse`), `netarmor` (`securenet.ValidateURL`).
+Five direct requires, listed in `go.mod` order:
 
-`extract` deliberately depends on nothing but goquery and the stdlib. Whitespace normalization used to come from `go-utils/text.NormalizeText`, which is a one-line `strings.Join(strings.Fields(s), " ")` but drags gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. It now lives here as `normalizeSpace`. Keep it that way unless a helper earns its dependency.
+- `github.com/PuerkitoBio/goquery` — DOM traversal for `extract`.
+- `github.com/shouni/go-http-kit` — the default client (`httpkit.New`) and `HandleResponse`, which is where the 25MB response cap comes from.
+- `github.com/shouni/go-remote-io` — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, `gcs.New`/`s3.New`).
+- `github.com/shouni/netarmor` — `securenet.ValidateURL` and the scheme constants.
+- `golang.org/x/net` — `html` node types, used by `extract`'s text walk.
+
+`extract` deliberately depends on nothing but goquery, `x/net/html` and the stdlib. Whitespace normalization used to come from `go-utils/text.NormalizeText`, which is a one-line `strings.Join(strings.Fields(s), " ")` but drags gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. It now lives here as `normalizeSpace`. Keep it that way unless a helper earns its dependency.
 
 ## History
 
