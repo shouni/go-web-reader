@@ -83,7 +83,7 @@ Beyond that, single-tag tests don't need the CSS machinery at all: `tagName` rea
 - `github.com/shouni/netarmor` — `securenet.ValidateURL` and the scheme constants.
 - `golang.org/x/net` — `html` node types, used by `extract`'s text walk.
 
-`extract` deliberately depends on nothing but goquery, cascadia, `x/net/html` and the stdlib — and the first two are the same dependency, since goquery already requires cascadia. Whitespace normalization used to come from `go-utils/text.NormalizeText`, which is a one-line `strings.Join(strings.Fields(s), " ")` but drags gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. It now lives here as `normalizeSpace`. Keep it that way unless a helper earns its dependency.
+`extract` deliberately depends on nothing but goquery, cascadia, `x/net/html` and the stdlib — and the first two are the same dependency, since goquery already requires cascadia. Whitespace normalization used to come from `go-utils/text.NormalizeText`; it moved here as `normalizeSpace` because a one-line `strings.Join(strings.Fields(s), " ")` dragged gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. That package has since been deleted from go-utils for the same reason, so there is nothing to go back to. Keep helpers local unless one earns its dependency.
 
 ## History
 
