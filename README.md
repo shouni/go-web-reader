@@ -6,7 +6,7 @@
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/shouni/go-web-reader)](https://github.com/shouni/go-web-reader/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Reference](https://pkg.go.dev/badge/github.com/shouni/go-web-reader.svg)](https://pkg.go.dev/github.com/shouni/go-web-reader)
-[![Status](https://img.shields.io/badge/Status-Completed-brightgreen)](#)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen)](#)
 
 ## 🚀 概要 (About) — Web とクラウドストレージを扱うユニバーサル・リーダー
 
