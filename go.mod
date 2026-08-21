@@ -7,7 +7,7 @@ require (
 	github.com/andybalholm/cascadia v1.3.4
 	github.com/shouni/go-http-kit v1.8.2
 	github.com/shouni/go-remote-io v1.8.1
-	github.com/shouni/netarmor v1.2.2
+	github.com/shouni/netarmor v1.2.3
 	golang.org/x/net v0.58.0
 )
 
