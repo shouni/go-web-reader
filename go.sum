@@ -127,8 +127,8 @@ github.com/shouni/go-http-kit v1.8.2 h1:0FTLrJrQr1nGD6G/BHtK6ByrMnDf7H6MxrgIXZmU
 github.com/shouni/go-http-kit v1.8.2/go.mod h1:HbqpvjLnASSXkQlmCzrVVWWyr1oBNH/fBbuE6gBWWBg=
 github.com/shouni/go-remote-io v1.8.1 h1:6FIjZb3VRdywEWwMfDFtudYCxnv2hY4w6wfkfvojcdE=
 github.com/shouni/go-remote-io v1.8.1/go.mod h1:2iajoUdC37HXGU+Nwu17TLPDKaD4mVS7hxpmxYxbsUY=
-github.com/shouni/netarmor v1.2.2 h1:2E2nX49juhGnFw3DMFdt7VVrl9TSo3ZS6NXQILnZ0ic=
-github.com/shouni/netarmor v1.2.2/go.mod h1:WxojUH0M+Z2lqZH2vw572A1zn5l1VkH7V47rnTnZmVY=
+github.com/shouni/netarmor v1.2.3 h1:JqzhpYcO9vAnaTkbEgnkE/+GHpXAyL98L4LU0TzS1OA=
+github.com/shouni/netarmor v1.2.3/go.mod h1:xreejMKmmzHfRdtIOKDBjMPMdROgN2o6QVYYhKjtKLw=
 github.com/spiffe/go-spiffe/v2 v2.8.1 h1:eXZMLsu+3MLEPJyGJkolqtVrteZfQdUpOWj6LTiDl/E=
 github.com/spiffe/go-spiffe/v2 v2.8.1/go.mod h1:47Q0Q9/AqGha8QLHp+kxpH4Wca7X7EnOtlIJy3mxZ3U=
 github.com/stretchr/testify v1.12.0 h1:K6Mr6jO9JICuend/5xzTM03ydSV3vdNRYAdPSukj8uI=
