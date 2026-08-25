@@ -86,9 +86,8 @@ github.com/envoyproxy/protoc-gen-validate v1.3.3 h1:MVQghNeW+LZcmXe7SY1V36Z+WFMD
 github.com/envoyproxy/protoc-gen-validate v1.3.3/go.mod h1:TsndJ/ngyIdQRhMcVVGDDHINPLWB7C82oDArY51KfB0=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
-github.com/fsouza/fake-gcs-server v1.55.1 h1:8IsUkVFYQnS/QLyci2ORdpn7pkmqs+6hnJ8w51bN7Gg=
-github.com/fsouza/fake-gcs-server v1.55.1/go.mod h1:5XZDg/ZKtY/ciEwJcFRaVz/YQ0FqffGAVTXyyaZZAuA=
 github.com/fsouza/fake-gcs-server v1.56.1 h1:K03sAvbLvDz4hAynpCCUqnNRp+ik9JFSvHbkD/wTPOU=
+github.com/fsouza/fake-gcs-server v1.56.1/go.mod h1:rzibfBNKouMLeVYDkIDqUiCEcfgDyJWe+4PhG7uesmU=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
 github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
@@ -126,10 +125,8 @@ github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 h1:GHRpF1pTW19a
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5PCi+MFsC7HjREoAz1BU+Mq60+05gifQSsHSDG/8=
 github.com/shouni/go-http-kit v1.9.0 h1:EUG1Xpa0U9uucZvT9/WG6L5iRIxQs0mmEQzpORk8qr8=
 github.com/shouni/go-http-kit v1.9.0/go.mod h1:HV2+wZNJR/SxNpYrlu2i8ROw64sQO1thdZ3mw9olQqc=
-github.com/shouni/go-remote-io v1.9.0 h1:soOCs80UMvAC/wbyess4sn+WafKJZxdOArNsXeCafEM=
-github.com/shouni/go-remote-io v1.9.0/go.mod h1:eH/rBfJFQy+hylTq5eLzyj/5NDvvDGjNxEStRXsCw9s=
-github.com/shouni/go-remote-io v1.9.1 h1:GAnz6kzVHah5uP0IO6rorWACDWiILEZEyycDU23G6So=
-github.com/shouni/go-remote-io v1.9.1/go.mod h1:9wDA5jLz1ul2H1qoOeKPvG2uyM0EIq/fIF4bgjr2SYc=
+github.com/shouni/go-remote-io v1.10.1 h1:YibcoceYy7f6Wv6wGAEzPGW/lJkdQCc2jXPvMaH0oc8=
+github.com/shouni/go-remote-io v1.10.1/go.mod h1:9wDA5jLz1ul2H1qoOeKPvG2uyM0EIq/fIF4bgjr2SYc=
 github.com/shouni/netarmor v1.3.0 h1:/Jaf4n7m2jnDxIKDAvh3cAcrKCsqG3Ajk6nEyadaOtw=
 github.com/shouni/netarmor v1.3.0/go.mod h1:9I46wWqG6E8oUzadDBYOmxqMjsz7TbrfSSCGi2piJaM=
 github.com/spiffe/go-spiffe/v2 v2.8.1 h1:eXZMLsu+3MLEPJyGJkolqtVrteZfQdUpOWj6LTiDl/E=
