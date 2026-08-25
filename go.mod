@@ -1,6 +1,6 @@
 module github.com/shouni/go-web-reader
 
-go 1.26
+go 1.27
 
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
