@@ -136,6 +136,41 @@ func TestText(t *testing.T) {
 				"A | B",
 			expectedBodyFound: true,
 		},
+		{
+			// <br> は改行そのものなので、前後の行が 1 語に融合しないこと。
+			name: "br_separates_adjacent_lines",
+			html: `<html><head><title>Break</title></head><body><main>
+                   <p>The quick brown fox<br>jumps over the lazy dog.</p>
+                   </main></body></html>`,
+			expectedText:      titlePrefix + "Break" + "\n\n" + "The quick brown fox jumps over the lazy dog.",
+			expectedBodyFound: true,
+		},
+		{
+			// noscript の中身はパーサからはただのテキストに見えるため、
+			// 落とさないと囲っている段落の本文に混ざる。
+			name: "noscript_and_hidden_elements_are_dropped",
+			html: `<html><head><title>Noise</title></head><body><main>
+                   <p><noscript>JavaScriptを有効にしてください。</noscript>` + longParagraph + `</p>
+                   <p hidden>` + longParagraph + ` hidden.</p>
+                   <p aria-hidden="true">` + longParagraph + ` aria.</p>
+                   </main></body></html>`,
+			expectedText:      titlePrefix + "Noise" + "\n\n" + longParagraph,
+			expectedBodyFound: true,
+		},
+		{
+			// 定義リストと図のキャプションも本文として拾うこと。
+			// li と同じく、短くても項目として意味を持つので長さでは落とさない。
+			name: "definition_list_and_figcaption_are_extracted",
+			html: `<html><head><title>Terms</title></head><body><main>
+                   <dl><dt>SSRF</dt><dd>Server-Side Request Forgery</dd></dl>
+                   <figure><figcaption>図1</figcaption></figure>
+                   </main></body></html>`,
+			expectedText: titlePrefix + "Terms" + "\n\n" +
+				"SSRF" + "\n\n" +
+				"Server-Side Request Forgery" + "\n\n" +
+				"図1",
+			expectedBodyFound: true,
+		},
 	}
 
 	for _, tc := range testCases {

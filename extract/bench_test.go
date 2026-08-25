@@ -41,3 +41,34 @@ func BenchmarkText(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkTextCharset は文字コード判定の経路ごとのコストを測ります。
+//
+// 宣言の無い UTF-8（高位ビットあり）だけが変換なしで済み、それ以外は
+// transform.Reader を 1 枚挟みます。ASCII だけの文書は判定材料が無いため
+// 既定の windows-1252 として復号されます（ASCII の範囲では恒等変換）。
+func BenchmarkTextCharset(b *testing.B) {
+	ascii := realisticDoc(100)
+	japanese := strings.ReplaceAll(ascii, "This is a", "これは日本語の")
+
+	cases := []struct {
+		name        string
+		doc         string
+		contentType string
+	}{
+		{name: "ascii-undeclared", doc: ascii},
+		{name: "utf8-undeclared", doc: japanese},
+		{name: "utf8-declared", doc: japanese, contentType: "text/html; charset=utf-8"},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, err := extract.TextWithContentType(b.Context(), strings.NewReader(tc.doc), tc.contentType); err != nil {
+					b.Fatalf("TextWithContentType() error = %v", err)
+				}
+			}
+		})
+	}
+}
