@@ -839,3 +839,97 @@ func newTestReader(t *testing.T, extractor Extractor, opts ...Option) *Universal
 
 	return New(baseOpts...)
 }
+
+// 既定の URL 安全性検証を使ったまま gs:// / s3:// が開けること。
+//
+// netarmor v1.3.0 の securenet.ValidateURL は http/https 以外をスキーム違反として
+// 拒否するようになりました（v1.2.3 は素通りさせていた）。全スキームを検証に通すと
+// GCS/S3 が一切開けなくなります。ここが既定の検証器を差し替えずに確かめる唯一の
+// テストなので、WithSafeURLValidator は渡しません。
+func TestOpenStorageWithDefaultURLValidator(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		uri  string
+		opt  func(StorageFactory) Option
+	}{
+		{name: "GCS", uri: "gs://bucket/path.txt", opt: WithGCSFactory},
+		{name: "S3", uri: "s3://bucket/path.txt", opt: WithS3Factory},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			factory := func(context.Context) (remoteio.IOFactory, error) {
+				return &stubFactory{reader: &stubReader{content: "storage body"}}, nil
+			}
+			r := New(WithExtractor(&stubExtractor{}), tt.opt(factory))
+			defer func() { _ = r.Close() }()
+
+			stream, err := r.Open(context.Background(), tt.uri)
+			if err != nil {
+				t.Fatalf("Open(%s) error = %v", tt.uri, err)
+			}
+			defer func() { _ = stream.Close() }()
+
+			body, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatalf("ReadAll() error = %v", err)
+			}
+			if got := string(body); got != "storage body" {
+				t.Fatalf("body = %q, want %q", got, "storage body")
+			}
+		})
+	}
+}
+
+// URL 安全性検証は HTTP(S) にだけ掛かること。
+// 接続先をクラウド SDK が決める gs:// / s3:// に対しては、検証する相手がいません。
+func TestSafeURLValidatorRunsOnlyForHTTP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		uri        string
+		wantCalled bool
+	}{
+		{name: "https", uri: "https://example.com/a.txt", wantCalled: true},
+		{name: "http", uri: "http://example.com/a.txt", wantCalled: true},
+		{name: "gs", uri: "gs://bucket/path.txt"},
+		{name: "s3", uri: "s3://bucket/path.txt"},
+		{name: "unsupported", uri: "ftp://example.com/a.txt"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var validated []string
+			r := New(
+				WithExtractor(&stubExtractor{}),
+				WithHTTPClient(&stubHTTPClient{contentType: "text/plain", body: "body"}),
+				WithGCSFactory(func(context.Context) (remoteio.IOFactory, error) {
+					return &stubFactory{reader: &stubReader{content: "body"}}, nil
+				}),
+				WithS3Factory(func(context.Context) (remoteio.IOFactory, error) {
+					return &stubFactory{reader: &stubReader{content: "body"}}, nil
+				}),
+				WithSafeURLValidator(func(_ context.Context, uri string) error {
+					validated = append(validated, uri)
+					return nil
+				}),
+			)
+			defer func() { _ = r.Close() }()
+
+			if stream, err := r.Open(context.Background(), tt.uri); err == nil {
+				_ = stream.Close()
+			}
+
+			if called := len(validated) > 0; called != tt.wantCalled {
+				t.Fatalf("検証器の呼び出し = %v (%v), want %v", called, validated, tt.wantCalled)
+			}
+		})
+	}
+}
