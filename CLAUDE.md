@@ -66,7 +66,7 @@ Don't reintroduce it without a concrete requirement that `WithHTTPClient` genuin
 
 ### Retry belongs to reader, not to the HTTP seam
 
-`HTTPClient` の口は `Do` だけです。レスポンス 1 個を受け取るだけの `Do` からは「同じ GET をやり直してよいか」を決められないため、リトライは `fetchBytes` が `netarmor/retry` で掛けます。既定の `httpkit.Client` も `Do` を直接呼ぶ経路にはリトライを掛けない（`DoRequest` / `FetchBytes` 経由だけ）ので、ここを持たないと既定構成でも一度も再試行されません。
+`HTTPClient` の口は `Do` だけです。レスポンス 1 個を受け取るだけの `Do` からは「同じ GET をやり直してよいか」を決められないため、リトライは `fetchBytes` が `go-http-kit/retry` で掛けます。既定の `httpkit.Client` も `Do` を直接呼ぶ経路にはリトライを掛けない（`DoRequest` / `FetchBytes` 経由だけ）ので、ここを持たないと既定構成でも一度も再試行されません。
 
 `httpkit.FetchBytes` に委譲しない理由は、あれが自前でリクエストを組み立てるためです。`newHTTPRequest` の `Accept` / `Sec-Fetch-*` / `Upgrade-Insecure-Requests` は httpkit が付けないぶん失われます。
 
@@ -113,9 +113,9 @@ Beyond that, single-tag tests don't need the CSS machinery at all: `tagName` rea
 
 - `github.com/PuerkitoBio/goquery` — DOM traversal for `extract`.
 - `github.com/andybalholm/cascadia` — goquery's own selector engine, used directly to precompile selectors (see below).
-- `github.com/shouni/go-http-kit` — the default client (`httpkit.New`) and `HandleResponse`, which is where the 25MB response cap comes from.
+- `github.com/shouni/go-http-kit` — the default client (`httpkit.New`) and `HandleResponse`, which is where the 25MB response cap comes from, plus `retry.RunValue` for the fetch retry loop (that package moved here from netarmor in go-http-kit v1.10.0).
 - `github.com/shouni/go-remote-io` — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, `gcs.New`/`s3.New`).
-- `github.com/shouni/netarmor` — `securenet.ValidateURL`, the scheme constants, and `retry.RunValue` for the fetch retry loop.
+- `github.com/shouni/netarmor` — `securenet.ValidateURL` and the scheme constants.
 - `golang.org/x/net` — `html` node types (`extract`'s text walk) and `html/charset` (charset detection).
 
 `extract` depends on goquery, cascadia, `x/net/html`, `x/net/html/charset` and the stdlib — and the first two are the same dependency, since goquery already requires cascadia. `html/charset` is the one entry that pulls something heavier in (`x/text`'s encoding tables); the rationale is in **Charset decoding lives in extract, and only there** above. Whitespace normalization used to come from `go-utils/text.NormalizeText`; it moved here as `normalizeSpace` because a one-line `strings.Join(strings.Fields(s), " ")` dragged gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. That package has since been deleted from go-utils for the same reason, so there is nothing to go back to. Keep helpers local unless one earns its dependency.

@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/shouni/go-http-kit/httpkit"
-	"github.com/shouni/netarmor/retry"
+	"github.com/shouni/go-http-kit/retry"
 )
 
 // mediaKind は media type から決まる本文の扱い方です。
