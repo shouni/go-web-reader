@@ -13,15 +13,14 @@ import (
 	"github.com/shouni/netarmor/securenet"
 )
 
-// HTTP(S) の URI プレフィックスです。remoteio.PrefixGCS / PrefixS3 と同じ粒度に
-// 揃えてあり、Open の振り分けはすべてこの形の文字列比較で済みます。
+// HTTP(S) のスキーム名です。remoteio.SchemeGCS / SchemeS3 と同じ粒度に揃えてあり、
+// Open の振り分けはすべてこの形の文字列比較で済みます。
 //
-// スキーム名そのものは netarmor の定数から取ります。securenet が「これは http だ」と
-// 見なす綴りと、こちらが HTTP として振り分ける綴りがずれると、検証を通り抜けた URI が
-// 別の枝に落ちます。"://" を足しているのは、securenet の定数がスキーム名だけのためです。
+// 綴りは netarmor の定数から取ります。securenet が「これは http だ」と見なす綴りと、
+// こちらが HTTP として振り分ける綴りがずれると、検証を通り抜けた URI が別の枝に落ちます。
 const (
-	prefixHTTP  = securenet.SchemeHTTP + "://"
-	prefixHTTPS = securenet.SchemeHTTPS + "://"
+	schemeHTTP  = securenet.SchemeHTTP
+	schemeHTTPS = securenet.SchemeHTTPS
 )
 
 // UniversalReader は URI の種類に応じて読み取りストリームを返します。
@@ -54,8 +53,8 @@ func New(opts ...Option) *UniversalReader {
 		safeURL:    cfg.safeURL,
 		retry:      cfg.retry,
 		storages: map[string]*storageReaderCache{
-			remoteio.PrefixGCS: {label: "GCS", newFactory: cfg.newGCSFactory},
-			remoteio.PrefixS3:  {label: "S3", newFactory: cfg.newS3Factory},
+			remoteio.SchemeGCS: {label: "GCS", newFactory: cfg.newGCSFactory},
+			remoteio.SchemeS3:  {label: "S3", newFactory: cfg.newS3Factory},
 		},
 	}
 }
@@ -75,7 +74,7 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 	// スキームの取り出しは go-remote-io と同じ関数を使います。自前で判定を書くと、
 	// 「どこからがスキームか」の解釈が両者でずれます。HTTP(S) も同じ関数を通すことで、
 	// 振り分けの入口がスキームによらず 1 つになります。
-	scheme := remoteio.SchemePrefix(uri)
+	scheme := remoteio.Scheme(uri)
 
 	// 振り分けは URL 安全性検証より先です。検証は「自分でダイヤルする相手が安全か」を
 	// 見るものなので、接続先をクラウド SDK が決める gs:// / s3:// には意味がありません。
@@ -85,7 +84,7 @@ func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, 
 	// なお securenet.IsSecureServiceURL はここでは使えません。あれは「安全なスキームか」
 	// を見る方針判定で、平文 HTTP は localhost 等にしか true を返しません。振り分けに使うと
 	// http:// が丸ごと未対応スキーム扱いになり、通るのは直後の検証で弾かれる URL だけになります。
-	if scheme == prefixHTTP || scheme == prefixHTTPS {
+	if scheme == schemeHTTP || scheme == schemeHTTPS {
 		if err := r.safeURL(ctx, uri); err != nil {
 			return nil, fmt.Errorf("URL安全性検証に失敗しました: %w", err)
 		}

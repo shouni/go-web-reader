@@ -19,11 +19,11 @@ import (
 // テスト実行時ではなくビルド時に検出するためのアサーション。
 // （go-remote-io v1.7.0 の List への ListOption 追加のような変更を取りこぼさないため）
 var (
-	_ remoteio.InputReader = (*stubReader)(nil)
-	_ remoteio.IOFactory   = (*stubFactory)(nil)
-	_ Extractor            = (*stubExtractor)(nil)
-	_ HTTPClient           = (*stubHTTPClient)(nil)
-	_ HTTPClient           = (*headerOverridingClient)(nil)
+	_ remoteio.Reader  = (*stubReader)(nil)
+	_ remoteio.Factory = (*stubFactory)(nil)
+	_ Extractor        = (*stubExtractor)(nil)
+	_ HTTPClient       = (*stubHTTPClient)(nil)
+	_ HTTPClient       = (*headerOverridingClient)(nil)
 )
 
 type stubExtractor struct {
@@ -74,8 +74,15 @@ func (s *stubHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// remoteio.InputReader を満足させるスタブ
+// stubReader は Open だけを差し替えたストアです。
+//
+// remoteio.Store を埋め込んでいるのは、reader が使うのが Open ひとつだけだからです。
+// 他のメソッドを呼べば nil で落ちますが、それは「読む以外の操作はこのパッケージの
+// 責務ではない」ことの表明でもあります。ビルド時の追従漏れは、実際に使う口である
+// remoteio.Reader へのアサーションで検出します。
 type stubReader struct {
+	remoteio.Store
+
 	content  string
 	err      error
 	lastPath string
@@ -89,12 +96,6 @@ func (s *stubReader) Open(_ context.Context, path string) (io.ReadCloser, error)
 	return io.NopCloser(strings.NewReader(s.content)), nil
 }
 
-// Lister / Exister インターフェースの実装（必要に応じて）
-func (s *stubReader) List(_ context.Context, _ string, _ func(string) error, _ ...remoteio.ListOption) error {
-	return nil
-}
-func (s *stubReader) Exists(_ context.Context, _ string) (bool, error) { return true, nil }
-
 type stubCloser struct {
 	closed int
 	err    error
@@ -105,24 +106,24 @@ func (s *stubCloser) Close() error {
 	return s.err
 }
 
-// remoteio.IOFactory を満足させるスタブ
+// remoteio.Factory を満足させるスタブ
 type stubFactory struct {
-	reader     remoteio.InputReader // 指標：具象型ではなくインターフェースで保持するように変更
+	reader     remoteio.Store // 具象型ではなくインターフェースで保持する
 	readerErr  error
 	closeErr   error
 	closeCalls int
 }
 
-func (s *stubFactory) InputReader() (remoteio.InputReader, error) {
+func (s *stubFactory) Store() (remoteio.Store, error) {
 	if s.readerErr != nil {
 		return nil, s.readerErr
 	}
-	// ここが nil であれば、呼び出し側で reader == nil として正しく判定されるのだ
+	// ここが nil であれば、呼び出し側で store == nil として正しく判定される
 	return s.reader, nil
 }
 
-func (s *stubFactory) OutputWriter() (remoteio.OutputWriter, error) { return nil, nil }
-func (s *stubFactory) URLSigner() (remoteio.URLSigner, error)       { return nil, nil }
+// Handler は reader からは使われません。remoteio.Factory を満たすためだけの実装です。
+func (s *stubFactory) Handler() (remoteio.Handler, error) { return nil, nil }
 
 func (s *stubFactory) Close() error {
 	s.closeCalls++
@@ -346,7 +347,7 @@ func TestReadGCSUsesInjectedReader(t *testing.T) {
 
 	storageReader := &stubReader{content: "gcs body"}
 	r := newTestReader(t, &stubExtractor{})
-	storageCache(t, r, remoteio.PrefixGCS).reader = storageReader
+	storageCache(t, r, remoteio.SchemeGCS).reader = storageReader
 
 	stream, err := r.Open(context.Background(), "gs://bucket/path.txt")
 	if err != nil {
@@ -371,7 +372,7 @@ func TestReadS3UsesInjectedReader(t *testing.T) {
 
 	storageReader := &stubReader{content: "s3 body"}
 	r := newTestReader(t, &stubExtractor{})
-	storageCache(t, r, remoteio.PrefixS3).reader = storageReader
+	storageCache(t, r, remoteio.SchemeS3).reader = storageReader
 
 	stream, err := r.Open(context.Background(), "s3://bucket/path.txt")
 	if err != nil {
@@ -462,7 +463,7 @@ func TestNilOptionsAreIgnored(t *testing.T) {
 			if r.safeURL == nil || r.extractor == nil || r.httpClient == nil {
 				t.Fatal("nil オプションで既定の依存が失われている")
 			}
-			for _, scheme := range []string{remoteio.PrefixGCS, remoteio.PrefixS3} {
+			for _, scheme := range []string{remoteio.SchemeGCS, remoteio.SchemeS3} {
 				if storageCache(t, r, scheme).newFactory == nil {
 					t.Fatalf("%s のファクトリが失われている", scheme)
 				}
@@ -517,8 +518,8 @@ func TestCloseClosesManagedResources(t *testing.T) {
 	gcsCloser := &stubCloser{}
 	s3Closer := &stubCloser{}
 	r := newTestReader(t, &stubExtractor{})
-	gcsCache := storageCache(t, r, remoteio.PrefixGCS)
-	s3Cache := storageCache(t, r, remoteio.PrefixS3)
+	gcsCache := storageCache(t, r, remoteio.SchemeGCS)
+	s3Cache := storageCache(t, r, remoteio.SchemeS3)
 	gcsCache.reader = &stubReader{}
 	gcsCache.closer = gcsCloser
 	s3Cache.reader = &stubReader{}
@@ -542,7 +543,7 @@ func TestOpenAfterCloseIsRejected(t *testing.T) {
 	t.Parallel()
 
 	r := newTestReader(t, &stubExtractor{})
-	storageCache(t, r, remoteio.PrefixGCS).reader = &stubReader{content: "x"}
+	storageCache(t, r, remoteio.SchemeGCS).reader = &stubReader{content: "x"}
 
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -572,7 +573,7 @@ func TestNewStorageReaderClosesFactoryOnReaderError(t *testing.T) {
 		readerErr: errors.New("reader failed"),
 	}
 
-	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.IOFactory, error) {
+	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.Factory, error) {
 		return factory, nil
 	})
 	if err == nil {
@@ -586,17 +587,17 @@ func TestNewStorageReaderClosesFactoryOnReaderError(t *testing.T) {
 func TestNewStorageReaderClosesFactoryOnNilReader(t *testing.T) {
 	t.Parallel()
 
-	// 修正ポイント：reader フィールドが初期値(nil)のままの状態。
-	// これにより InputReader() が (remoteio.InputReader)(nil) を返すことをシミュレート。
+	// reader フィールドが初期値 (nil) のままの状態。
+	// これにより Store() が (remoteio.Store)(nil) を返すことをシミュレートする。
 	factory := &stubFactory{}
 
-	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.IOFactory, error) {
+	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.Factory, error) {
 		return factory, nil
 	})
 	if err == nil {
 		t.Fatal("newStorageReader() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "reader is nil") {
+	if !strings.Contains(err.Error(), "store is nil") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 	if factory.closeCalls != 1 {
@@ -628,12 +629,12 @@ func TestOpenStorageInitializesSchemesIndependently(t *testing.T) {
 	gcsStarted := make(chan struct{})
 
 	r := newTestReader(t, &stubExtractor{},
-		WithGCSFactory(func(context.Context) (remoteio.IOFactory, error) {
+		WithGCSFactory(func(context.Context) (remoteio.Factory, error) {
 			close(gcsStarted)
 			<-release // GCS の初期化を意図的に滞留させる
 			return &stubFactory{reader: &stubReader{content: "gcs body"}}, nil
 		}),
-		WithS3Factory(func(context.Context) (remoteio.IOFactory, error) {
+		WithS3Factory(func(context.Context) (remoteio.Factory, error) {
 			return &stubFactory{reader: &stubReader{content: "s3 body"}}, nil
 		}),
 	)
@@ -687,7 +688,7 @@ func TestOpenStorageReusesCachedReader(t *testing.T) {
 
 	var factoryCalls int
 	r := newTestReader(t, &stubExtractor{},
-		WithGCSFactory(func(context.Context) (remoteio.IOFactory, error) {
+		WithGCSFactory(func(context.Context) (remoteio.Factory, error) {
 			factoryCalls++
 			return &stubFactory{reader: &stubReader{content: "gcs body"}}, nil
 		}),
@@ -719,7 +720,7 @@ func TestOpenAfterCloseDoesNotReinitialize(t *testing.T) {
 
 	var factories []*stubFactory
 	r := newTestReader(t, &stubExtractor{},
-		WithGCSFactory(func(context.Context) (remoteio.IOFactory, error) {
+		WithGCSFactory(func(context.Context) (remoteio.Factory, error) {
 			f := &stubFactory{reader: &stubReader{content: "gcs body"}}
 			factories = append(factories, f)
 			return f, nil
@@ -862,7 +863,7 @@ func TestOpenStorageWithDefaultURLValidator(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := func(context.Context) (remoteio.IOFactory, error) {
+			factory := func(context.Context) (remoteio.Factory, error) {
 				return &stubFactory{reader: &stubReader{content: "storage body"}}, nil
 			}
 			r := New(WithExtractor(&stubExtractor{}), tt.opt(factory))
@@ -910,10 +911,10 @@ func TestSafeURLValidatorRunsOnlyForHTTP(t *testing.T) {
 			r := New(
 				WithExtractor(&stubExtractor{}),
 				WithHTTPClient(&stubHTTPClient{contentType: "text/plain", body: "body"}),
-				WithGCSFactory(func(context.Context) (remoteio.IOFactory, error) {
+				WithGCSFactory(func(context.Context) (remoteio.Factory, error) {
 					return &stubFactory{reader: &stubReader{content: "body"}}, nil
 				}),
-				WithS3Factory(func(context.Context) (remoteio.IOFactory, error) {
+				WithS3Factory(func(context.Context) (remoteio.Factory, error) {
 					return &stubFactory{reader: &stubReader{content: "body"}}, nil
 				}),
 				WithSafeURLValidator(func(_ context.Context, uri string) error {

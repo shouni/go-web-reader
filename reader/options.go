@@ -60,7 +60,7 @@ type SafeURLValidator func(context.Context, string) error
 
 // StorageFactory は GCS/S3 のクライアント一式を生成します。
 // 実際の接続確立を伴うため、対象スキームの初回 Open 時にだけ呼ばれます。
-type StorageFactory func(context.Context) (remoteio.IOFactory, error)
+type StorageFactory func(context.Context) (remoteio.Factory, error)
 
 // HTTPClient は HTTP リクエストを実行する最小インターフェースです。
 type HTTPClient interface {
@@ -97,8 +97,8 @@ func newOptions(opts ...Option) options {
 		},
 		extractor:     extract.Engine{},
 		httpClient:    httpkit.New(httpkit.DefaultHTTPTimeout),
-		newGCSFactory: func(ctx context.Context) (remoteio.IOFactory, error) { return gcs.New(ctx) },
-		newS3Factory:  func(ctx context.Context) (remoteio.IOFactory, error) { return s3.New(ctx) },
+		newGCSFactory: func(ctx context.Context) (remoteio.Factory, error) { return gcs.New(ctx) },
+		newS3Factory:  func(ctx context.Context) (remoteio.Factory, error) { return s3.New(ctx) },
 		retry: retryPolicy{
 			maxRetries:      DefaultMaxRetries,
 			initialInterval: DefaultRetryInitialInterval,

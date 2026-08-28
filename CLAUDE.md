@@ -105,8 +105,9 @@ Beyond that, single-tag tests don't need the CSS machinery at all: `tagName` rea
 - **Cleanup**: `Close` runs *every* closer and merges failures with `errors.Join`; it never stops at the first error or drops one. Don't `defer resource.Close()` and ignore the result.
 - **Close is terminal for every scheme**: `UniversalReader.closed` が印です。スキームごとのキャッシュにも同じ印はありますが、HTTP には解放するものが無いぶん印が付かず、それだけだと `Close` 後も `https://` が読めてしまいます。
 - **Content-Type support** is the `mediaKinds` table in `reader/http.go` alone — `classifyMediaType` drives both the dispatch switch and the malformed-header fallback, so adding a type means editing that table and nothing else.
-- **Scheme parsing** is borrowed from `remoteio.SchemePrefix` rather than reimplemented. gs/s3 でこれが必須なのは、`reader` が URI を**そのまま** `remoteio.Reader.Open` に渡し、向こう側が再度パースするためです。「どこからがスキームか」の解釈がずれれば実バグになります。HTTP(S) も同じ関数を通していますが、理由は違います — http URI を go-remote-io は見ないので、**合わせる相手はいません**。揃えているのは振り分けを 1 系統にするためで、副産物として `strings.HasPrefix` を手書きする際の罠（`"://"` を付け忘れると `"httpfoo://"` まで HTTP 扱いになる）が消えます。スキーム名そのものは `securenet.SchemeHTTP` / `SchemeHTTPS` から取ります。Adding a scheme means one more entry in the `storages` map in `reader.New`.
-- **大文字スキームは未対応**: `SchemePrefix` も `strings.HasPrefix` も大小を区別するため、`HTTPS://example.com` は「未対応のURIスキームです」になります（`url.Parse` と違い正規化しません）。対応するなら HTTP とストレージの両方を揃えて直してください。片側だけ直すと非対称になります。
+- **Scheme parsing** is borrowed from `remoteio.Scheme` rather than reimplemented. gs/s3 でこれが必須なのは、`reader` が URI を**そのまま** `remoteio.Reader.Open` に渡し、向こう側が再度パースするためです。「どこからがスキームか」の解釈がずれれば実バグになります。HTTP(S) も同じ関数を通していますが、理由は違います — http URI を go-remote-io は見ないので、**合わせる相手はいません**。揃えているのは振り分けを 1 系統にするためで、副産物として `strings.HasPrefix` を手書きする際の罠（`"://"` を付け忘れると `"httpfoo://"` まで HTTP 扱いになる）が消えます。スキーム名そのものは `securenet.SchemeHTTP` / `SchemeHTTPS` から取ります。振り分けのキーは区切りを含まない名前 (`"gs"`) です。Adding a scheme means one more entry in the `storages` map in `reader.New`.
+- **大文字スキームは未対応**: `remoteio.Scheme` も `strings.HasPrefix` も大小を区別するため、`HTTPS://example.com` は「未対応のURIスキームです」になります（`url.Parse` と違い正規化しません）。対応するなら HTTP とストレージの両方を揃えて直してください。片側だけ直すと非対称になります。
+- **`storageReaderCache` は `remoteio.Lazy` に置き換えられません**: 遅延生成とキャッシュだけなら `Lazy` で足りますが、ここでキャッシュしているのは `remoteio.Factory` の**寿命**（`Close` と、解放後の利用拒否）です。`Lazy` は `Handler` を包むもので寿命を持ちません。置き換えると closer の管理を別建てで戻すことになるため、このキャッシュは残しています。
 - **Dispatch is not a security predicate**: 振り分けに `securenet.IsSecureServiceURL` や `ValidateURL` の成否を使わないでください。前者は平文 HTTP を localhost 等にしか許さないので `http://` が丸ごと未対応スキームになります。後者は (1) 実際に走るのは注入された `r.safeURL` なので、利用者の検証器が「どのバックエンドが処理するか」を左右してしまい、(2) 分岐条件が netarmor のセキュリティ方針そのものになる（v1.2.3 → v1.3.0 で実際に変わった）うえ、(3) 名前解決を伴うため振り分けが I/O になります。
 
 ## Key dependencies
@@ -114,7 +115,7 @@ Beyond that, single-tag tests don't need the CSS machinery at all: `tagName` rea
 - `github.com/PuerkitoBio/goquery` — DOM traversal for `extract`.
 - `github.com/andybalholm/cascadia` — goquery's own selector engine, used directly to precompile selectors (see below).
 - `github.com/shouni/go-http-kit` — the default client (`httpkit.New`) and `HandleResponse`, which is where the 25MB response cap comes from, plus `retry.RunValue` for the fetch retry loop (that package moved here from netarmor in go-http-kit v1.10.0).
-- `github.com/shouni/go-remote-io` — GCS/S3 abstraction (`remoteio.IOFactory`, `remoteio.Reader`, `SchemePrefix`, `PrefixGCS`/`PrefixS3`, `gcs.New`/`s3.New`).
+- `github.com/shouni/go-remote-io` — GCS/S3 abstraction (`remoteio.Factory`, `remoteio.Store`, `remoteio.Reader`, `Scheme`, `SchemeGCS`/`SchemeS3`, `gcs.New`/`s3.New`).
 - `github.com/shouni/netarmor` — `securenet.ValidateURL` and the scheme constants.
 - `golang.org/x/net` — `html` node types (`extract`'s text walk) and `html/charset` (charset detection).
 
