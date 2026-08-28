@@ -66,18 +66,21 @@ func newStorageReader(ctx context.Context, newFactory StorageFactory) (remoteio.
 		return nil, nil, fmt.Errorf("ストレージファクトリの生成に失敗: %w", err)
 	}
 
-	reader, err := factory.InputReader()
+	// Store は読み書き・一覧・署名までを 1 つに束ねますが、ここで要るのは Open だけです。
+	// 保持する型を remoteio.Reader に絞ってあるのは、このパッケージが
+	// 「読む」以上のことをしないと型で示すためです。
+	store, err := factory.Store()
 	if err != nil {
 		_ = factory.Close()
 		return nil, nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
 	}
 
-	if reader == nil {
+	if store == nil {
 		_ = factory.Close()
-		return nil, nil, fmt.Errorf("リーダーの生成に失敗: reader is nil")
+		return nil, nil, fmt.Errorf("リーダーの生成に失敗: store is nil")
 	}
 
-	return reader, factory, nil
+	return store, factory, nil
 }
 
 // close は保持しているクローザーを閉じ、以後の利用を拒否します。
