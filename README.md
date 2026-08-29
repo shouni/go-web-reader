@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Reference](https://pkg.go.dev/badge/github.com/shouni/go-web-reader.svg)](https://pkg.go.dev/github.com/shouni/go-web-reader)
 
-## 🚀 概要 (About) — Web とクラウドストレージを扱うユニバーサル・リーダー
+## 🚀 概要 (About) - Web の本文抽出も GCS / S3 の読み取りも、同じインターフェースで
 
 **Go Web Reader** は、Web サイトの本文抽出とクラウドストレージ（GCS/S3）の読み取りを、単一のインターフェースで扱う Go 言語向け**ライブラリ**です。
 
