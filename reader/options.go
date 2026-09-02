@@ -96,7 +96,7 @@ func newOptions(opts ...Option) options {
 			return securenet.ValidateURL(ctx, uri)
 		},
 		extractor:     extract.Engine{},
-		httpClient:    httpkit.New(httpkit.DefaultHTTPTimeout),
+		httpClient:    httpkit.New(),
 		newGCSFactory: func(ctx context.Context) (remoteio.Factory, error) { return gcs.New(ctx) },
 		newS3Factory:  func(ctx context.Context) (remoteio.Factory, error) { return s3.New(ctx) },
 		retry: retryPolicy{

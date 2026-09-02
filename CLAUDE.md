@@ -66,9 +66,9 @@ Don't reintroduce it without a concrete requirement that `WithHTTPClient` genuin
 
 ### Retry belongs to reader, not to the HTTP seam
 
-`HTTPClient` の口は `Do` だけです。レスポンス 1 個を受け取るだけの `Do` からは「同じ GET をやり直してよいか」を決められないため、リトライは `fetchBytes` が `go-http-kit/retry` で掛けます。既定の `httpkit.Client` も `Do` を直接呼ぶ経路にはリトライを掛けない（`DoRequest` / `FetchBytes` 経由だけ）ので、ここを持たないと既定構成でも一度も再試行されません。
+`HTTPClient` の口は `Do` だけです。レスポンス 1 個を受け取るだけの `Do` からは「同じ GET をやり直してよいか」を決められないため、リトライは `fetchBytes` が `go-http-kit/retry` で掛けます。既定の `httpkit.Client` も `Do` を直接呼ぶ経路にはリトライを掛けない（`Send` / `Get` 経由だけ）ので、ここを持たないと既定構成でも一度も再試行されません。
 
-`httpkit.FetchBytes` に委譲しない理由は、あれが自前でリクエストを組み立てるためです。`newHTTPRequest` の `Accept` / `Sec-Fetch-*` / `Upgrade-Insecure-Requests` は httpkit が付けないぶん失われます。
+`httpkit.Get` に委譲しない理由は、あれが自前でリクエストを組み立てるためです。`newHTTPRequest` の `Accept` / `Sec-Fetch-*` / `Upgrade-Insecure-Requests` は httpkit が付けないぶん失われます。
 
 再試行の可否は、クライアントが `RetryClassifier`（`IsHTTPRetryableError`）を満たすならそちらに委ねます。エラーの型を知っているのはそれを返したクライアントなので、既定構成ではリトライ対象の定義が httpkit と二重管理になりません。満たさないクライアント向けのフォールバック判定が `shouldRetryFetch` の後半です。
 
