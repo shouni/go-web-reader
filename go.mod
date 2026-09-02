@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/andybalholm/cascadia v1.3.4
-	github.com/shouni/go-http-kit v1.10.0
+	github.com/shouni/go-http-kit v1.11.0
 	github.com/shouni/go-remote-io v1.11.0
 	github.com/shouni/netarmor v1.4.0
 	golang.org/x/net v0.58.0

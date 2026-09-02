@@ -127,6 +127,8 @@ github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 h1:GHRpF1pTW19a
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5PCi+MFsC7HjREoAz1BU+Mq60+05gifQSsHSDG/8=
 github.com/shouni/go-http-kit v1.10.0 h1:2L5zPnZpbEgxGeTsdDP5fKFcS6efpXOOvMBCcbzzlHQ=
 github.com/shouni/go-http-kit v1.10.0/go.mod h1:rk5iB0MB/Z3cnMGrQlTubCoDA+QUFHGMF7g7PA7ArQo=
+github.com/shouni/go-http-kit v1.11.0 h1:IrCkC+yxpX7AMPIHNPsVySeu5Lgzngnxuge9TB/qtCQ=
+github.com/shouni/go-http-kit v1.11.0/go.mod h1:rk5iB0MB/Z3cnMGrQlTubCoDA+QUFHGMF7g7PA7ArQo=
 github.com/shouni/go-remote-io v1.11.0 h1:DECXbwTYi32r3TiqMNe6IQ8/UOEe5Twv2CRFbrTziSs=
 github.com/shouni/go-remote-io v1.11.0/go.mod h1:jUxjW7lUcbClHHdjHutvpRjrHfw26Fs+yuf4UwSGzbA=
 github.com/shouni/netarmor v1.4.0 h1:ePG5m1Ao3jvDwdNarsGHqekGYeRJDdoSmHrivqN2TfE=
