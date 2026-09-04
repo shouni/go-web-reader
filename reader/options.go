@@ -114,6 +114,10 @@ func newOptions(opts ...Option) options {
 }
 
 // Option は UniversalReader の依存を差し替えるためのオプションです。
+//
+// nil の Option、および nil の値を渡した With* は無視され、既定値が保たれます。
+// 差し替えたつもりで既定のまま動くことになるため、差し替え対象を組み立てる側で
+// nil にならないことを確かめてください。
 type Option func(*options)
 
 // WithMaxRetries は HTTP 取得を再試行する回数を設定します（初回の実行は含みません）。
@@ -121,6 +125,10 @@ type Option func(*options)
 //
 // 再試行するのは 5xx / 408 / 429 と、分類できない通信エラー（タイムアウトなど）だけです。
 // 4xx やレスポンスサイズ超過は、同じリクエストを繰り返しても結果が変わらないため再試行しません。
+//
+// レスポンスに Retry-After があった場合、次の待機時間は指数バックオフの算出値ではなく
+// その指示値になります（WithRetryInterval で設定した間隔は使われません）。
+// サーバーが待てと言った時間より早く送り直しても、同じ拒否が返るだけだからです。
 //
 // 既定のクライアントを WithHTTPClient で自前のリトライ付きクライアントに
 // 差し替える場合は、二重に待たないよう 0 を渡してください。
@@ -160,6 +168,10 @@ func WithExtractor(extractor Extractor) Option {
 //
 // リクエストのヘッダーを変えたい場合もここです。Do の中で受け取った
 // *http.Request のヘッダーを上書きしてから元のクライアントに委譲できます。
+//
+// レスポンスサイズの上限は外れません。上限を掛けるのはクライアントの外側
+// （返ってきた *http.Response を読み切る go-http-kit の処理）なので、
+// どのクライアントに差し替えても、どの Content-Type でも等しくかかります。
 func WithHTTPClient(client HTTPClient) Option {
 	return func(o *options) {
 		if client != nil {
@@ -169,6 +181,14 @@ func WithHTTPClient(client HTTPClient) Option {
 }
 
 // WithSafeURLValidator は URL 安全性検証関数を差し替えます。
+//
+// ここで渡した検証器が呼ばれるのは、スキームの振り分けの後、HTTP(S) の枝でだけです。
+// gs:// / s3:// は接続先をクラウド SDK が決めるため検証を通らず、ストレージ側の URI を
+// 弾くための口ではありません。
+//
+// ローカルのテストサーバーへ向けたい場合は、これと WithHTTPClient の両方を
+// 差し替えてください。検証器だけを緩めても、既定の HTTP クライアントが接続の直前に
+// 行う IP 検証で制限ネットワーク宛ての接続が落ちます。
 func WithSafeURLValidator(fn SafeURLValidator) Option {
 	return func(o *options) {
 		if fn != nil {

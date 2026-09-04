@@ -136,36 +136,18 @@ HTTP(S) では、レスポンスの media type で挙動が決まります。
 
 ## 📑 本文抽出のルール
 
-`extract` は「記事本文だけを残す」ことを目的にしたヒューリスティックです。
+`extract` は「記事本文だけを残す」ことを目的にしたヒューリスティックです。ノイズ（`script` /
+`nav` / `aside` / 広告・SNS・コメント欄まわりのクラスなど）をページ全体から落としてから、
+`article` / `main` / `.entry-content` などの本文候補を選び、その中のブロック要素を DOM の
+出現順に拾います。
 
-**0. 文字コードを判定する** — BOM →`Content-Type` の `charset` →`<meta charset>` →本文のバイト列、の順に
-判定して UTF-8 に変換します。変換を挟まないと、パーサが入力を UTF-8 とみなすため非 UTF-8 のページが
-そのまま文字化けします。
+**短い段落は本文として採用されません。** ナビゲーションの断片が残らない代わりに、1 文だけの
+段落も落ちます。しきい値は `extract.MinParagraphLength` / `extract.MinHeadingLength` として
+公開しており、**バイト数ではなく文字数で測ります**（`len()` で測ると日本語はしきい値が実質 1/3 に
+なるためです）。
 
-**1. ノイズを落とす** — `script`、`style`、`form`、`nav`、`aside`、`noscript`、`template`、`[hidden]`、
-`[aria-hidden="true"]`、および広告・SNS・コメント欄まわりのクラス（`.ad-banner`、`.social-share`、
-`.comments` など）をページ全体から除去します。`noscript` / `template` はパーサからは中身がただのテキストに
-見えるため、落とさないと囲っている段落の本文に混ざります。
-
-**2. 本文の範囲を決める** — `article` / `main` / `div[role=main]` / `#content` / `.entry-content` などに
-最初に一致した要素を本文とします。見つからない場合はページ全体を本文とみなし、**そのときだけ**
-`header` / `footer` / `.sidebar` も落とします（記事の内側の `header` は見出しを、`footer` は署名を
-含むことがあるため、常に落とすと本文が欠けます）。
-
-**3. ブロック要素を順に拾う** — `p`、`h1`〜`h6`、`li`、`dt`、`dd`、`figcaption`、`blockquote`、`table`、`pre`
-を DOM の出現順に走査します。入れ子（`<li><p>…</p></li>` など）は一度だけ出力されます。`<br>` は空白として
-扱うため、前後の行が 1 語に融合しません。出力の形は次のとおりです。
-
-* `title` — `【記事タイトル】 ` を付けて先頭に
-* `h1`〜`h6` — `## ` を付ける（`MinHeadingLength` 文字以上のもの）
-* `p`, `blockquote` — `MinParagraphLength` 文字以上のものだけ
-* `li`, `dt`, `dd`, `figcaption` — 長さを問わず出力（項目・定義語・キャプションは短くても意味を持つため）
-* `table` — `【表題】 ` 付きキャプションと `セル | セル` の行（空行は出力しない）
-* `pre` — コードフェンスで囲む
-
-**しきい値はバイト数ではなく文字数で測ります。** `len()` で測ると日本語は 1 文字 3 バイトぶんなので
-しきい値が実質 1/3 になり、ナビゲーションの断片が本文として残ります。値は
-`extract.MinParagraphLength` / `extract.MinHeadingLength` として公開しています。
+走査順・セレクタの一覧・出力の形（見出しの `## `、表、コードフェンスなど）は
+[pkg.go.dev の `extract`](https://pkg.go.dev/github.com/shouni/go-web-reader/extract) にあります。
 
 -----
 

@@ -60,6 +60,13 @@ func New(opts ...Option) *UniversalReader {
 }
 
 // Open は URI のスキームを判別し、適切な読み取りストリームを返します。
+//
+// 扱えるのは https:// / http:// / gs:// / s3:// の 4 つで、それ以外は
+// 「未対応のURIスキームです」を返します。ローカルファイルパスは対象外です。
+//
+// スキームは小文字で書かれている必要があります。判定は "://" の前をそのまま
+// 文字列比較するだけで、url.Parse と違って大文字小文字を正規化しないため、
+// HTTPS:// のような大文字のスキームは未対応として扱われます。
 func (r *UniversalReader) Open(ctx context.Context, uri string) (io.ReadCloser, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("context is required")
