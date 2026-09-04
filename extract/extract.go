@@ -7,6 +7,42 @@
 // 入力は UTF-8 でなくても構いません。BOM・<meta charset>・本文のバイト列から
 // 文字コードを判定して UTF-8 に変換してから解析します。Content-Type ヘッダーが
 // 手元にある場合は TextWithContentType に渡してください。
+//
+// # 本文抽出のルール
+//
+// 「記事本文だけを残す」ことを目的にしたヒューリスティックで、次の順に処理します。
+//
+// 0. 文字コードを判定する。BOM → Content-Type の charset → <meta charset> →
+// 本文のバイト列、の順に判定して UTF-8 に変換します。変換を挟まないと、パーサが
+// 入力を UTF-8 とみなすため非 UTF-8 のページがそのまま文字化けします。
+//
+// 1. ノイズを落とす。script、style、form、nav、aside、noscript、template、
+// [hidden]、[aria-hidden="true"]、および広告・SNS・コメント欄まわりのクラス
+// （.related-posts、.social-share、.comments、.ad-banner、.advertisement）を
+// ページ全体から除去します。noscript / template はパーサからは中身がただの
+// テキストに見えるため、落とさないと囲っている段落の本文に混ざります。
+//
+// 2. 本文の範囲を決める。article、main、div[role='main']、#main、#content、
+// .post-content、.article-body、.entry-content、.markdown-body、.readme に
+// 最初に一致した要素を本文とします。見つからない場合はページ全体を本文とみなし、
+// そのときだけ header / footer / .sidebar も落とします（記事の内側の header は
+// 見出しを、footer は署名を含むことがあるため、常に落とすと本文が欠けます）。
+//
+// 3. ブロック要素を順に拾う。p、h1〜h6、li、dt、dd、figcaption、blockquote、
+// table、pre を DOM の出現順に走査します。入れ子（<li><p>…</p></li> など）は
+// 一度だけ出力されます。<br> は空白として扱うため、前後の行が 1 語に融合しません。
+// 出力の形は次のとおりです。
+//
+//   - title — 「【記事タイトル】 」を付けて先頭に
+//   - h1〜h6 — 「## 」を付ける（MinHeadingLength 文字以上のもの）
+//   - p, blockquote — MinParagraphLength 文字以上のものだけ
+//   - li, dt, dd, figcaption — 長さを問わず出力（項目・定義語・キャプションは
+//     短くても意味を持つため）
+//   - table — 「【表題】 」付きキャプションと「セル | セル」の行（空行は出力しない）
+//   - pre — コードフェンスで囲む
+//
+// しきい値はバイト数ではなく文字数で測ります。len() で測ると日本語は 1 文字 3 バイト
+// ぶんなのでしきい値が実質 1/3 になり、ナビゲーションの断片が本文として残ります。
 package extract
 
 import (
