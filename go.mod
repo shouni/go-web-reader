@@ -6,7 +6,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/andybalholm/cascadia v1.3.4
 	github.com/shouni/go-http-kit v1.11.0
-	github.com/shouni/go-remote-io v1.11.1
+	github.com/shouni/go-remote-io v1.11.2
 	github.com/shouni/netarmor v1.4.0
 	golang.org/x/net v0.58.0
 )
@@ -72,7 +72,7 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/api v0.294.0 // indirect
+	google.golang.org/api v0.295.0 // indirect
 	google.golang.org/genproto v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
