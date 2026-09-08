@@ -88,6 +88,8 @@ Anything that adds a selector must decide which of the two lists it belongs to.
 
 `<br>` はブロック要素ではないので走査対象にはなりませんが、`writeOwnText` で空白に置き換えます。置き換えないと `行1<br>行2` の 2 つのテキストノードが直結して 1 語になります。
 
+**表だけは逆向きに解決します。** `<td><p>…</p></td>` の `<p>` を個別に出すと行の文脈（どのセルか）が失われるので、表の内側にあるブロック要素は走査で飛ばし（`insideTable`）、`processTable` がセルの文字列として平坦化して出します（`allText`。ブロック要素と `tableTags` の境界に空白を挟むので `<li>A</li><li>B</li>` が `AB` に融合しません）。入れ子の表も外側のセルに畳まれます。行とセルはセレクタではなく `html.Node` を直下から辿って取ります — `FindMatcher("tr")` は入れ子の表の行まで拾い、同じセルが 3 回出ていました。
+
 ### Selectors are compiled once, and tag checks skip CSS entirely
 
 goquery's string-taking `Find`/`Is` call `cascadia.Compile` on **every** call — there is no cache. That is fine for a once-per-document query and wasteful for a per-node one, so every selector here is a package-level `cascadia.MustCompile` used through `FindMatcher`/`IsMatcher`.

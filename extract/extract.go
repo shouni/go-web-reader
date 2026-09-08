@@ -30,7 +30,8 @@
 //
 // 3. ブロック要素を順に拾う。p、h1〜h6、li、dt、dd、figcaption、blockquote、
 // table、pre を DOM の出現順に走査します。入れ子（<li><p>…</p></li> など）は
-// 一度だけ出力されます。<br> は空白として扱うため、前後の行が 1 語に融合しません。
+// 一度だけ出力されます。表の中身は表の行としてだけ出し、セル内の段落やリスト、
+// 入れ子の表を個別には出しません。<br> は空白として扱うため、前後の行が 1 語に融合しません。
 // 出力の形は次のとおりです。
 //
 //   - title — 「【記事タイトル】 」を付けて先頭に
@@ -38,7 +39,8 @@
 //   - p, blockquote — MinParagraphLength 文字以上のものだけ
 //   - li, dt, dd, figcaption — 長さを問わず出力（項目・定義語・キャプションは
 //     短くても意味を持つため）
-//   - table — 「【表題】 」付きキャプションと「セル | セル」の行（空行は出力しない）
+//   - table — 「【表題】 」付きキャプションと「セル | セル」の行（空行は出力しない）。
+//     セルの中は長さを問わず平坦化して出力
 //   - pre — コードフェンスで囲む
 //
 // しきい値はバイト数ではなく文字数で測ります。len() で測ると日本語は 1 文字 3 バイト
@@ -125,6 +127,10 @@ func extractContentText(doc *goquery.Document) (text string, hasBodyFound bool, 
 	// 親子が両方一致した場合は両方が訪問されるため、二重に出さない責任は
 	// processGeneralElement 側にあります。
 	findMainContent(doc).FindMatcher(blockMatcher).Each(func(_ int, s *goquery.Selection) {
+		// 表の中身は表が行として出すので、中のブロック要素は個別に訪問しません。
+		if insideTable(s.Get(0)) {
+			return
+		}
 		if content := processBlock(s); content != "" {
 			parts = append(parts, content)
 		}

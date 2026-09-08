@@ -43,6 +43,10 @@ var blockTags = []string{"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "dt", "d
 
 var headingTags = []string{"h1", "h2", "h3", "h4", "h5", "h6"}
 
+// tableTags は表の構造を成す要素です。表のセルを平坦化するときに、ブロック要素と
+// 同じく境界に空白を挟む対象になります（入れ子の表のセル同士が融合しないように）。
+var tableTags = []string{"caption", "thead", "tbody", "tfoot", "tr", "th", "td"}
+
 // shortTags は段落の最小文字数を課さないブロック要素です。
 // リスト項目・定義語・図のキャプションは、短くてもそれ自体で意味を持ちます。
 var shortTags = []string{"li", "dt", "dd", "figcaption"}
@@ -57,13 +61,12 @@ var (
 	pageFrameMatcher   = cascadia.MustCompile(pageFrameSelectors)
 	titleMatcher       = cascadia.MustCompile("title")
 	bodyMatcher        = cascadia.MustCompile("body")
-	captionMatcher     = cascadia.MustCompile("caption")
-	rowMatcher         = cascadia.MustCompile("tr")
-	cellMatcher        = cascadia.MustCompile("th, td")
 
-	blockTagSet   = newTagSet(blockTags)
-	headingTagSet = newTagSet(headingTags)
-	shortTagSet   = newTagSet(shortTags)
+	blockTagSet = newTagSet(blockTags)
+	// flattenBoundarySet は表のセルを平坦化するときに空白で区切る要素です。
+	flattenBoundarySet = newTagSet(append(append([]string{}, blockTags...), tableTags...))
+	headingTagSet      = newTagSet(headingTags)
+	shortTagSet        = newTagSet(shortTags)
 )
 
 func newTagSet(tags []string) map[string]struct{} {
