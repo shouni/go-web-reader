@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Go Web Reader is a Go **library** (no CLI, no `main`) that reads content from a URI regardless of backend — `https://`, `gs://`, and `s3://` all go through one `Open(ctx, uri)`. Two public packages:
+Go Web Reader is a Go **library** (no CLI, no `main`) that reads content from a URI regardless of backend — `https://`, `http://`, `gs://`, and `s3://` all go through one `Open(ctx, uri)`. Two public packages:
 
 - `reader` — scheme dispatch, Content-Type handling, fetch retry, GCS/S3 lazy init, DI options.
+  `reader.go` が公開 API とスキーム振り分け、`options.go` がインターフェースと `With*`、`fetch.go` が HTTP の取得とリトライ、`http.go` が Content-Type の振り分け、`storage.go` が GCS/S3 の遅延初期化です。
 - `extract` — HTML main-content extraction (charset detection included). Usable on its own.
+  `extract.go` が公開 API と抽出の流れ、`selectors.go` がセレクタとタグ集合、`text.go` がブロック要素のテキスト組み立て、`table.go` が表の平坦化です。
 
-`extract` は 3 ファイルに分かれています。`extract.go` が公開 API と抽出の流れ、`selectors.go` がセレクタとタグ集合の定義、`text.go` がノードを歩いてテキストを組み立てる部分です。
-
-Dependency direction is one-way: `reader` → `extract`. Nothing imports `reader`.
+テストは実装ファイルと 1:1 の `_test.go` に置きます。Dependency direction is one-way: `reader` → `extract`. Nothing imports `reader`.
 
 ## Commands
 
@@ -22,6 +22,7 @@ test -z "$(gofmt -l .)"              # format check (CI fails on any diff)
 go test -race ./...                  # full test suite, as run in CI
 go test -race ./reader/...           # single package
 go test -race -run TestName ./...    # single test
+go test -bench . -run ^$ ./extract/  # extraction benchmarks
 golangci-lint run                    # lint (.golangci.yml: errcheck, govet, ineffassign, staticcheck, unused, gocritic, revive)
 govulncheck ./...                    # vulnerability scan (also runs in CI)
 ```
@@ -34,96 +35,68 @@ Per-function rationale lives in the doc comments; this section covers only what 
 
 ### Interfaces live with their consumer
 
-There is no shared `ports`/`types` package. `reader` declares the `HTTPClient` and `Extractor` interfaces it consumes; `extract` takes a plain `io.Reader` and names no type from `reader`. That is what keeps the dependency one-way — a shared interface package would let the two entangle. `extract.Engine` satisfies `reader.Extractor` structurally.
+There is no shared `ports`/`types` package. `reader` declares the `HTTPClient` and `Extractor` interfaces it consumes; `extract` takes a plain `io.Reader` and names no type from `reader`. A shared interface package would let the two entangle. `extract.Engine` satisfies `reader.Extractor` structurally. `Engine` is deliberately *not* named `Extractor` — that name belongs to the `reader` interface.
 
 ### Charset decoding lives in extract, and only there
 
-`extract` は入力を UTF-8 に直してから解析します（`golang.org/x/net/html/charset`）。goquery / `x/net/html` は入力を UTF-8 とみなすため、これが無いと Shift_JIS / EUC-JP のページが丸ごと文字化けします。
+`extract` は入力を UTF-8 に直してから解析します（`golang.org/x/net/html/charset`）。**変換を挟む箇所は 1 つだけです** — UTF-8 に直したバイト列を再度 `<meta charset>` の宣言で解釈し直せば壊れるため、`reader` 側では変換できません。`reader` の `Content-Type` は `ContentTypeExtractor` を通して判定材料として渡すだけです。
 
-**変換を挟む箇所は 1 つだけです。** UTF-8 に直したバイト列をもう一度 `<meta charset>` の宣言（Shift_JIS）で解釈し直せば壊れるため、`reader` 側でも変換する形にはできません。`reader` が持つ `Content-Type` は `ContentTypeExtractor`（`ExtractWithContentType`）を通して**判定材料として渡すだけ**で、変換はしません。この追加インターフェースは `WithExtractor` とは別の口ではなく、同じ口に渡された抽出器が持てる追加の能力です。
-
-代償として `extract` は `x/text` のエンコーディング表を引き込みます（`x/net/html/charset` の依存）。日本語のページを読むライブラリでこれは払う価値のあるコストと判断していますが、`extract` の依存を「goquery・cascadia・`x/net/html`・標準ライブラリだけ」に保つ方針の唯一の例外です。
+代償として `extract` は `x/text` のエンコーディング表を引き込みます。`extract` の依存を「goquery・cascadia・`x/net/html`・標準ライブラリだけ」に保つ方針の唯一の例外で、日本語のページを読むライブラリとして払う価値があると判断しています。
 
 ### extract does no I/O
 
-`extract.Text(ctx, io.Reader)` is the whole engine; `extract.Engine` is an empty struct that forwards to it, existing only so `WithExtractor` has an interface value to accept. It is deliberately *not* named `Extractor`: that name belongs to the `reader` interface, and having both would put two different `Extractor` types in one codebase. The zero value works, so there is no constructor and no init error — which in turn is why `reader.New` returns no error.
-
-This is a deliberate narrowing from the `go-web-exact` version this was absorbed from, which held a `Fetcher` purely to serve a `FetchAndExtractText(ctx, url)` convenience method. Fetching belongs to `reader`. **Do not reintroduce network access into `extract`.**
+`extract.Text(ctx, io.Reader)` is the whole engine; `extract.Engine` is an empty struct that forwards to it. The zero value works, so there is no constructor and no init error — which is why `reader.New` returns no error. **Do not reintroduce network access into `extract`** (the `go-web-exact` version it came from had a `Fetcher`; fetching belongs to `reader`).
 
 ### One HTTP seam, not two
 
-`WithHTTPClient` is the only way to change how fetching happens. There used to be a second seam — a `Fetcher` interface plus `WithFetcher` that replaced the whole fetch step — and it was removed because it had no users and no capability of its own: a custom `HTTPClient.Do` can rewrite the `*http.Request` (headers included) before delegating, which covers the case `WithFetcher` was there for. Removing it also let every default move into `newOptions`; the `Fetcher` default could not live there because it depended on `cfg.httpClient`.
-
-Don't reintroduce it without a concrete requirement that `WithHTTPClient` genuinely cannot serve. Note that `httpkit.HandleResponse` — and therefore the 25MB response cap — is applied by `fetchOnce` outside the client, so a swapped client cannot lose it; a `Fetcher` seam could.
+`WithHTTPClient` is the only way to change how fetching happens. A `Fetcher`/`WithFetcher` seam that replaced the whole fetch step was removed: a custom `HTTPClient.Do` can rewrite the `*http.Request` before delegating, which covers every case it served. Don't reintroduce it without a concrete requirement `WithHTTPClient` cannot serve. Note that the 25MB response cap (`httpkit.HandleResponse`) is applied by `fetchOnce` outside the client, so a swapped client cannot lose it; a `Fetcher` seam could.
 
 ### The URL safety check runs after scheme dispatch, and only for HTTP(S)
 
-`Open` はスキームを振り分けてから、HTTP(S) の枝の中でだけ `safeURL` を呼びます。順序を逆にすると **GCS/S3 が一切開けません**: netarmor v1.3.0 の `securenet.ValidateURL` は http/https 以外を `ErrDisallowedScheme` で拒否します（v1.2.3 は素通りさせていました）。
-
-順序の問題である以前に、検証の意味がスキームによって違います。`SafeURLValidator` は「自分でダイヤルする相手が安全か」を名前解決込みで見る SSRF 対策で、接続先をクラウド SDK が決める `gs://` / `s3://` には掛ける相手がいません。
-
-`WithSafeURLValidator` に渡した検証器も HTTP(S) でしか呼ばれません。ストレージ側の URI を弾きたい場合の口ではない、ということです。`reader_test.go` の `TestOpenStorageWithDefaultURLValidator` が、**既定の検証器を差し替えないまま** `gs://` / `s3://` を開ける唯一のテストです。他のテストは `newTestReader` が検証器を no-op に差し替えるため、ここが壊れても気づきません。消さないでください。
+理由は `Open` のコメントにあります。ここで言うべきは順序の保証がテストに依存していることです: `reader_test.go` / `storage_test.go` の `newTestReader` は検証器を no-op に差し替えるため、**`TestOpenStorageWithDefaultURLValidator` だけが既定の検証器のまま `gs://` / `s3://` を開ける**ことを確かめています。消さないでください。
 
 ### Retry belongs to reader, not to the HTTP seam
 
-`HTTPClient` の口は `Do` だけです。レスポンス 1 個を受け取るだけの `Do` からは「同じ GET をやり直してよいか」を決められないため、リトライは `fetchBytes` が `go-http-kit/retry` で掛けます。既定の `httpkit.Client` も `Do` を直接呼ぶ経路にはリトライを掛けない（`Send` / `Get` 経由だけ）ので、ここを持たないと既定構成でも一度も再試行されません。
-
-`httpkit.Get` に委譲しない理由は、あれが自前でリクエストを組み立てるためです。`newHTTPRequest` の `Accept` / `Sec-Fetch-*` / `Upgrade-Insecure-Requests` は httpkit が付けないぶん失われます。
-
-再試行の可否は、クライアントが `RetryClassifier`（`IsHTTPRetryableError`）を満たすならそちらに委ねます。エラーの型を知っているのはそれを返したクライアントなので、既定構成ではリトライ対象の定義が httpkit と二重管理になりません。満たさないクライアント向けのフォールバック判定が `shouldRetryFetch` の後半です。
-
-待ち時間の既定値は httpkit（初期 5 秒・最大 30 秒）より短くしています。`Open` は呼び出し側を待たせる同期 API だからです。
+`HTTPClient` の口は `Do` だけなので、リトライは `fetchBytes` が `go-http-kit/retry` で掛けます。既定の `httpkit.Client` も `Do` にはリトライを掛けないため、ここを持たないと既定構成でも一度も再試行されません。再試行の可否はクライアントが `RetryClassifier` を満たすならそちらに委ね、満たさないクライアント向けのフォールバックが `shouldRetryFetch` の後半です。待ち時間の既定値は httpkit（初期 5 秒・最大 30 秒）より短くしています — `Open` は同期 API だからです。
 
 ### Two selector lists, removed at different times
 
-`extract` removes `noiseSelectors` (script/style/form/nav/aside/ad-ish classes) from the whole document *before* choosing the main content, so an `<article>` nested inside an `<aside>` cannot be mistaken for the body. `pageFrameSelectors` (header/footer/.sidebar) is removed *only* on the fallback path, because inside a real article a `<header>` usually holds the `<h1>` and a `<footer>` the byline — dropping those unconditionally loses body text.
-
-Anything that adds a selector must decide which of the two lists it belongs to.
+`noiseSelectors` is removed from the whole document *before* choosing the main content, so an `<article>` nested inside an `<aside>` cannot be mistaken for the body. `pageFrameSelectors` (header/footer/.sidebar) is removed *only* on the fallback path, because inside a real article a `<header>` holds the `<h1>` and a `<footer>` the byline. Anything that adds a selector must decide which list it belongs to.
 
 ### Nested blocks are emitted once
 
-`FindMatcher(blockMatcher)` visits a parent and its matching descendants both (goquery dedupes *nodes*, not nested text). `writeOwnText` is what prevents `<li><p>…</p></li>` from printing the same sentence twice: it refuses to descend into any child whose tag is in `blockTagSet`, because that child gets its own visit.
+`FindMatcher(blockMatcher)` visits a parent and its matching descendants both (goquery dedupes *nodes*, not nested text). `ownText` refuses to descend into any child whose tag is in `blockTagSet`, because that child gets its own visit. `blockMatcher` and `blockTagSet` are both derived from `blockTags`; `shortTagSet` and `flattenBoundarySet` follow the same pattern. Don't hardcode any of them.
 
-`blockMatcher` and `blockTagSet` are both derived from the `blockTags` slice, so extending the element list in that one place keeps the two in step. Don't hardcode either of them. 長さのしきい値を免除する要素も同じ形で `shortTags` から `shortTagSet` を導出しています。
-
-`<br>` はブロック要素ではないので走査対象にはなりませんが、`writeOwnText` で空白に置き換えます。置き換えないと `行1<br>行2` の 2 つのテキストノードが直結して 1 語になります。
-
-**表だけは逆向きに解決します。** `<td><p>…</p></td>` の `<p>` を個別に出すと行の文脈（どのセルか）が失われるので、表の内側にあるブロック要素は走査で飛ばし（`insideTable`）、`processTable` がセルの文字列として平坦化して出します（`allText`。ブロック要素と `tableTags` の境界に空白を挟むので `<li>A</li><li>B</li>` が `AB` に融合しません）。入れ子の表も外側のセルに畳まれます。行とセルはセレクタではなく `html.Node` を直下から辿って取ります — `FindMatcher("tr")` は入れ子の表の行まで拾い、同じセルが 3 回出ていました。
+表だけは逆向きです: 表の内側のブロック要素は走査で飛ばし（`insideTable`）、`processTable` がセルの文字列として平坦化します。`<td><p>…</p></td>` の `<p>` を個別に出すと行の文脈が失われ、短ければしきい値で消えるためです。
 
 ### Selectors are compiled once, and tag checks skip CSS entirely
 
-goquery's string-taking `Find`/`Is` call `cascadia.Compile` on **every** call — there is no cache. That is fine for a once-per-document query and wasteful for a per-node one, so every selector here is a package-level `cascadia.MustCompile` used through `FindMatcher`/`IsMatcher`.
-
-Beyond that, single-tag tests don't need the CSS machinery at all: `tagName` reads `html.Node.Data` directly, and `writeOwnText` walks `FirstChild`/`NextSibling` rather than `Contents().Each`, which allocates a `Selection` per child. Together those cut ~40% of the run time and ~68% of the allocations on a 100-section article (`go test -bench BenchmarkText ./extract/`). Keep new per-node checks off the string API.
-
-文字コード判定の追加と `noiseSelectors` / `blockTags` の拡張で、同じベンチマークが 716µs → 789µs（+10%、内訳はおよそ半々）になっています。**速度を理由にこのどちらかを戻さないでください** — 落ちるのは出力の正しさの側です。経路ごとのコストは `BenchmarkTextCharset` で測れます。
+goquery's string-taking `Find`/`Is` call `cascadia.Compile` on **every** call. Every selector here is a package-level `cascadia.MustCompile`, and single-tag tests read `html.Node.Data` directly instead. Keep new per-node checks off the string API. 文字コード判定と `noiseSelectors` / `blockTags` の拡張で `BenchmarkText/sections=100` は約 10% 遅くなりました。**速度を理由に戻さないでください** — 落ちるのは出力の正しさの側です。
 
 ### Length thresholds are counted in runes
 
-`len()` would measure bytes, making the thresholds effectively one third for Japanese text and letting navigation fragments through. `MinHeadingLength` is 2 rather than 3 so that two-character headings (`概要`) survive. `<li>` is exempt from the paragraph threshold — list items are legitimately short.
+`len()` would measure bytes, making the thresholds effectively one third for Japanese text. `MinHeadingLength` is 2 so that `概要` survives. `<li>`/`<dt>`/`<dd>`/`<figcaption>` and table cells are exempt from the paragraph threshold.
 
 ## Conventions
 
-- **Cleanup**: `Close` runs *every* closer and merges failures with `errors.Join`; it never stops at the first error or drops one. Don't `defer resource.Close()` and ignore the result.
-- **Close is terminal for every scheme**: `UniversalReader.closed` が印です。スキームごとのキャッシュにも同じ印はありますが、HTTP には解放するものが無いぶん印が付かず、それだけだと `Close` 後も `https://` が読めてしまいます。
-- **Content-Type support** is the `mediaKinds` table in `reader/http.go` alone — `classifyMediaType` drives both the dispatch switch and the malformed-header fallback, so adding a type means editing that table and nothing else.
-- **Scheme parsing** is borrowed from `remoteio.Scheme` rather than reimplemented. gs/s3 でこれが必須なのは、`reader` が URI を**そのまま** `remoteio.Reader.Open` に渡し、向こう側が再度パースするためです。「どこからがスキームか」の解釈がずれれば実バグになります。HTTP(S) も同じ関数を通していますが、理由は違います — http URI を go-remote-io は見ないので、**合わせる相手はいません**。揃えているのは振り分けを 1 系統にするためで、副産物として `strings.HasPrefix` を手書きする際の罠（`"://"` を付け忘れると `"httpfoo://"` まで HTTP 扱いになる）が消えます。スキーム名そのものは `securenet.SchemeHTTP` / `SchemeHTTPS` から取ります。振り分けのキーは区切りを含まない名前 (`"gs"`) です。Adding a scheme means one more entry in the `storages` map in `reader.New`.
-- **大文字スキームは未対応**: `remoteio.Scheme` も `strings.HasPrefix` も大小を区別するため、`HTTPS://example.com` は「未対応のURIスキームです」になります（`url.Parse` と違い正規化しません）。対応するなら HTTP とストレージの両方を揃えて直してください。片側だけ直すと非対称になります。
-- **`storageReaderCache` は `remoteio.Lazy` に置き換えられません**: 遅延生成とキャッシュだけなら `Lazy` で足りますが、ここでキャッシュしているのは `remoteio.Factory` の**寿命**（`Close` と、解放後の利用拒否）です。`Lazy` は `Handler` を包むもので寿命を持ちません。置き換えると closer の管理を別建てで戻すことになるため、このキャッシュは残しています。
-- **README.md follows `public-docs/docs/library-readme-convention.md`**: scope and traps only, one "first call" code example, signatures and defaults in godoc, reasoning here. It deliberately carries no option/retry tables and no changelog sections — concrete defaults (retry counts and intervals, the response size cap) are stated in the doc comments and in `go-http-kit`, so the README names them by option rather than by value.
-- **Dispatch is not a security predicate**: 振り分けに `securenet.IsSecureServiceURL` や `ValidateURL` の成否を使わないでください。前者は平文 HTTP を localhost 等にしか許さないので `http://` が丸ごと未対応スキームになります。後者は (1) 実際に走るのは注入された `r.safeURL` なので、利用者の検証器が「どのバックエンドが処理するか」を左右してしまい、(2) 分岐条件が netarmor のセキュリティ方針そのものになる（v1.2.3 → v1.3.0 で実際に変わった）うえ、(3) 名前解決を伴うため振り分けが I/O になります。
+- **Cleanup**: `Close` runs *every* closer and merges failures with `errors.Join`. Don't `defer resource.Close()` and ignore the result.
+- **Close is terminal for every scheme**, including HTTP — `UniversalReader.closed` が印です。
+- **Content-Type support** is the `mediaKinds` table in `reader/http.go`. Adding a type means editing that table and the README's 対応 Content-Type list (the only user-facing copy — `mediaKinds` is unexported).
+- **Scheme parsing** uses `remoteio.Scheme` for every scheme. gs/s3 では URI をそのまま `remoteio.Reader.Open` に渡すので必須で、HTTP(S) は振り分けを 1 系統にするために揃えています。スキーム名は `securenet.SchemeHTTP` / `SchemeHTTPS` から取り、キーは区切りを含まない名前 (`"gs"`) です。Adding a scheme means one more entry in the `storages` map in `reader.New`.
+- **大文字スキームは未対応** (`HTTPS://`)。対応するなら HTTP とストレージの両方を揃えて直してください。
+- **Dispatch is not a security predicate**: 振り分けに `securenet` の判定を使わないでください（理由は `Open` のコメント）。名前解決を伴うため振り分けが I/O になる、という点も加わります。
+- **README.md follows `public-docs/docs/library-readme-convention.md`**: scope and traps only, one "first call" code example, signatures and defaults in godoc, reasoning here. No option/retry tables, no changelog.
 
 ## Key dependencies
 
-- `github.com/PuerkitoBio/goquery` — DOM traversal for `extract`.
-- `github.com/andybalholm/cascadia` — goquery's own selector engine, used directly to precompile selectors (see below).
-- `github.com/shouni/go-http-kit` — the default client (`httpkit.New`) and `HandleResponse`, which is where the 25MB response cap comes from, plus `retry.RunValue` for the fetch retry loop (that package moved here from netarmor in go-http-kit v1.10.0).
-- `github.com/shouni/go-remote-io` — GCS/S3 abstraction (`remoteio.Factory`, `remoteio.Store`, `remoteio.Reader`, `Scheme`, `SchemeGCS`/`SchemeS3`, `gcs.New`/`s3.New`).
-- `github.com/shouni/netarmor` — `securenet.ValidateURL` and the scheme constants.
-- `golang.org/x/net` — `html` node types (`extract`'s text walk) and `html/charset` (charset detection).
+- `goquery` + `cascadia` (goquery's own engine, used directly to precompile selectors) — `extract`.
+- `go-http-kit` — default client, `HandleResponse` (the 25MB cap), `retry.RunValue`.
+- `go-remote-io` — GCS/S3 abstraction and `Scheme`.
+- `netarmor/securenet` — `ValidateURL` and the scheme constants.
+- `x/net` — `html` node types and `html/charset`.
 
-`extract` depends on goquery, cascadia, `x/net/html`, `x/net/html/charset` and the stdlib — and the first two are the same dependency, since goquery already requires cascadia. `html/charset` is the one entry that pulls something heavier in (`x/text`'s encoding tables); the rationale is in **Charset decoding lives in extract, and only there** above. Whitespace normalization used to come from `go-utils/text.NormalizeText`; it moved here as `normalizeSpace` because a one-line `strings.Join(strings.Fields(s), " ")` dragged gomoji and uniseg (5.6MB of emoji and grapheme tables this repo never calls) into the build. That package has since been deleted from go-utils for the same reason, so there is nothing to go back to. Keep helpers local unless one earns its dependency.
+Keep helpers local unless one earns its dependency: `normalizeSpace` used to be `go-utils/text.NormalizeText`, which dragged 5.6MB of emoji/grapheme tables into the build for a one-liner. That package has since been deleted from go-utils.
 
 ## History
 
-`extract` was absorbed from [`go-web-exact`](https://github.com/shouni/go-web-exact) v2.5.2, now retired. That absorption is also where the import paths settled — `pkg/reader` lost its `pkg/`, `go-web-exact/v2/extract` became `extract`, `ports.Extractor` became `reader.Extractor` with `ExtractText` shortened to `Extract` (the method was repeating the interface name), the CLI was dropped, and `reader.New` stopped returning an error. Nothing in the fleet is on the pre-rename paths; the mapping lives in that release's history rather than in the README. Its `scraper`/`runner`/`builder` packages (parallel fetching with rate limiting, retries, HTML worker pool) were **not** brought over — they had no users. If bulk scraping is needed again, recover them from that repo's `v2.5.2` tag rather than rewriting, and note that `scraper` fetched without going through `SafeURLValidator`: anything reintroduced here must go through it.
+`extract` was absorbed from [`go-web-exact`](https://github.com/shouni/go-web-exact) v2.5.2 (retired); the import paths and names settled then (`pkg/reader` → `reader`, `ports.Extractor.ExtractText` → `reader.Extractor.Extract`, CLI dropped, `reader.New` stopped returning an error). Its `scraper`/`runner`/`builder` packages (parallel fetching, rate limiting, worker pool) were **not** brought over. If bulk scraping is needed again, recover them from that repo's `v2.5.2` tag rather than rewriting, and note that `scraper` bypassed `SafeURLValidator`: anything reintroduced here must go through it.
