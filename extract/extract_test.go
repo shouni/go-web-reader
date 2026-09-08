@@ -84,8 +84,7 @@ func TestText(t *testing.T) {
 		},
 		{
 			// article/main が無いページでは、ページ全体を本文として扱いつつ
-			// ナビゲーションやフッターを落とすこと。以前は goquery の Not が
-			// 子孫に効かず、リンクが <li> として本文に混ざっていた。
+			// ナビゲーションやフッターを落とすこと。
 			name: "page_without_main_drops_navigation_and_footer",
 			html: `<html><head><title>No Main</title></head><body>
                    <nav><ul><li>Home</li><li>About</li></ul></nav>

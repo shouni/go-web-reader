@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -9,51 +10,41 @@ import (
 )
 
 const (
-	// MinParagraphLength は、本文として採用する段落の最小文字数です。
-	// バイト数ではなく文字数で測ります。len() だと日本語は 1 文字 3 バイトのため
-	// しきい値が実質 1/3 になり、短いノイズが本文として残ります。
+	// MinParagraphLength は、本文として採用する段落の最小文字数（バイト数ではない）です。
 	MinParagraphLength = 20
-	// MinHeadingLength は、見出しとして採用する最小文字数です。
-	// 「概要」のような 2 文字の見出しを落とさない値にしています。
+	// MinHeadingLength は、見出しとして採用する最小文字数です。「概要」のような 2 文字の見出しを残します。
 	MinHeadingLength = 2
 
 	// mainContentSelectors は本文が入っていそうな要素です。最初に一致したものを本文候補にします。
 	mainContentSelectors = "article, main, div[role='main'], #main, #content, .post-content, .article-body, .entry-content, .markdown-body, .readme"
 
-	// noiseSelectors は本文の内側にあっても本文ではない要素です。
-	// 本文候補を決める前にページ全体から取り除きます。
-	//
-	// noscript / template は、パーサからは中身が「ただのテキスト」に見えるため、
-	// 落とさないと囲っている段落の本文に混ざります。hidden / aria-hidden は
-	// 画面に出さないことを文書自身が宣言している要素なので同様に扱います。
+	// noiseSelectors は本文の内側にあっても本文ではない要素で、本文候補を決める前に
+	// ページ全体から取り除きます。noscript / template はパーサからは中身がただのテキストに
+	// 見えるため、落とさないと段落に混ざります。hidden / aria-hidden は文書自身が非表示を宣言した要素です。
 	noiseSelectors = "script, style, form, nav, aside, noscript, template, [hidden], [aria-hidden='true'], .related-posts, .social-share, .comments, .ad-banner, .advertisement"
 
-	// pageFrameSelectors は、本文候補が見つからずページ全体を本文として扱うときにだけ
-	// 取り除く囲み要素です。noiseSelectors と分けているのは、記事の内側の <header> が
-	// 見出しを、<footer> が署名を持つことがあり、常に落とすと本文が欠けるためです。
+	// pageFrameSelectors は、本文候補が無くページ全体を本文とするときにだけ取り除く囲み要素です。
+	// 記事の内側の <header> は見出しを、<footer> は署名を持つことがあるため、常には落としません。
 	pageFrameSelectors = "header, footer, .sidebar"
 
 	titlePrefix        = "【記事タイトル】 "
 	tableCaptionPrefix = "【表題】 "
 )
 
-// blockTags は走査対象のブロック要素です。走査用のセレクタと ownText の
-// 入れ子スキップ判定の両方をここから導出するので、一覧はこの 1 箇所だけです。
+// blockTags は走査対象のブロック要素です。blockMatcher と blockTagSet を
+// ここから導出するので、一覧はこの 1 箇所だけです。
 var blockTags = []string{"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "dt", "dd", "figcaption", "blockquote", "table", "pre"}
 
 var headingTags = []string{"h1", "h2", "h3", "h4", "h5", "h6"}
 
-// tableTags は表の構造を成す要素です。表のセルを平坦化するときに、ブロック要素と
-// 同じく境界に空白を挟む対象になります（入れ子の表のセル同士が融合しないように）。
+// tableTags は表の構造要素です。セルの平坦化でブロック要素と同じく境界に空白を挟みます。
 var tableTags = []string{"caption", "thead", "tbody", "tfoot", "tr", "th", "td"}
 
-// shortTags は段落の最小文字数を課さないブロック要素です。
-// リスト項目・定義語・図のキャプションは、短くてもそれ自体で意味を持ちます。
+// shortTags は段落の最小文字数を課さないブロック要素です。短くても項目として意味を持ちます。
 var shortTags = []string{"li", "dt", "dd", "figcaption"}
 
-// セレクタは起動時に 1 度だけコンパイルします。goquery の Find/Is は
-// 文字列を受け取るたびに cascadia.Compile を呼び直すため、ノードごとに
-// 判定する箇所でそのまま使うと、走査のたびにセレクタを解析し直すことになります。
+// セレクタは 1 度だけコンパイルします。goquery の文字列を取る Find/Is は
+// 呼ぶたびに cascadia.Compile を呼び直し、キャッシュしません。
 var (
 	blockMatcher       = cascadia.MustCompile(strings.Join(blockTags, ", "))
 	mainContentMatcher = cascadia.MustCompile(mainContentSelectors)
@@ -62,11 +53,11 @@ var (
 	titleMatcher       = cascadia.MustCompile("title")
 	bodyMatcher        = cascadia.MustCompile("body")
 
-	blockTagSet = newTagSet(blockTags)
+	blockTagSet   = newTagSet(blockTags)
+	headingTagSet = newTagSet(headingTags)
+	shortTagSet   = newTagSet(shortTags)
 	// flattenBoundarySet は表のセルを平坦化するときに空白で区切る要素です。
-	flattenBoundarySet = newTagSet(append(append([]string{}, blockTags...), tableTags...))
-	headingTagSet      = newTagSet(headingTags)
-	shortTagSet        = newTagSet(shortTags)
+	flattenBoundarySet = newTagSet(slices.Concat(blockTags, tableTags))
 )
 
 func newTagSet(tags []string) map[string]struct{} {
@@ -78,9 +69,7 @@ func newTagSet(tags []string) map[string]struct{} {
 }
 
 // tagName は要素ノードのタグ名を返します。要素でなければ空文字列です。
-//
-// 単一タグの判定にセレクタを使わないのは、CSS の照合機構を通さずとも
-// html.Node のタグ名を直接見れば足りるためです。
+// 単一タグの判定に CSS の照合機構は要りません。
 func tagName(s *goquery.Selection) string {
 	node := s.Get(0)
 	if node == nil || node.Type != html.ElementNode {
