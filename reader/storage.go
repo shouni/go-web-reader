@@ -70,14 +70,13 @@ func newStorageReader(ctx context.Context, newFactory StorageFactory) (remoteio.
 	// 保持する型を remoteio.Reader に絞ってあるのは、このパッケージが
 	// 「読む」以上のことをしないと型で示すためです。
 	store, err := factory.Store()
+	if err == nil && store == nil {
+		err = fmt.Errorf("store is nil")
+	}
 	if err != nil {
+		// ファクトリはここでしか参照されないので、失敗したら閉じてから返します。
 		_ = factory.Close()
 		return nil, nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
-	}
-
-	if store == nil {
-		_ = factory.Close()
-		return nil, nil, fmt.Errorf("リーダーの生成に失敗: store is nil")
 	}
 
 	return store, factory, nil

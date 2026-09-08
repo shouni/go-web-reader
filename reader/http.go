@@ -35,6 +35,10 @@ var mediaKinds = map[string]mediaKind{
 	"text/plain":            mediaKindPassthrough,
 	"text/markdown":         mediaKindPassthrough,
 	"text/x-markdown":       mediaKindPassthrough,
+	"text/csv":              mediaKindPassthrough,
+	"application/json":      mediaKindPassthrough,
+	"application/xml":       mediaKindPassthrough,
+	"text/xml":              mediaKindPassthrough,
 }
 
 // classifyMediaType は media type の扱い方を返します。
@@ -62,13 +66,12 @@ type fetched struct {
 // リトライを httpClient 側ではなくここで持つのは、HTTPClient の口が Do だけで、
 // 「失敗したので同じ GET をやり直す」判断をレスポンス 1 個からは下せないためです。
 // 既定の httpkit.Client も、Do を直接呼ぶ経路にはリトライを掛けません。
-func (r *UniversalReader) fetchBytes(ctx context.Context, uri string) ([]byte, string, error) {
+func (r *UniversalReader) fetchBytes(ctx context.Context, uri string) (fetched, error) {
 	if r.retry.maxRetries == 0 {
-		got, err := r.fetchOnce(ctx, uri)
-		return got.body, got.contentType, err
+		return r.fetchOnce(ctx, uri)
 	}
 
-	got, err := retry.RunValue(ctx, func() (fetched, error) {
+	return retry.RunValue(ctx, func() (fetched, error) {
 		return r.fetchOnce(ctx, uri)
 	},
 		retry.WithName("GET "+uri),
@@ -77,8 +80,6 @@ func (r *UniversalReader) fetchBytes(ctx context.Context, uri string) ([]byte, s
 		retry.WithMaxInterval(r.retry.maxInterval),
 		retry.WithShouldRetry(r.shouldRetryFetch),
 	)
-
-	return got.body, got.contentType, err
 }
 
 // fetchOnce は再試行を挟まずに 1 度だけ GET します。
@@ -135,12 +136,12 @@ func (r *UniversalReader) shouldRetryFetch(err error) bool {
 // 取得は Content-Type によらず fetchBytes に一本化しているため、
 // httpkit.HandleResponse のレスポンスサイズ上限がどの Content-Type にも等しくかかります。
 func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadCloser, error) {
-	body, rawContentType, err := r.fetchBytes(ctx, uri)
+	got, err := r.fetchBytes(ctx, uri)
 	if err != nil {
 		return nil, err
 	}
 
-	contentType, err := resolveMediaType(rawContentType)
+	contentType, err := resolveMediaType(got.contentType)
 	if err != nil {
 		return nil, fmt.Errorf("Content-Typeの解析に失敗しました: %w", err)
 	}
@@ -149,9 +150,9 @@ func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadClos
 	case mediaKindHTML:
 		// 抽出器には解析済みの media type ではなく生のヘッダーを渡します。
 		// 文字コードは charset パラメータ側にあり、media type だけでは分かりません。
-		return r.openExtractedHTML(ctx, uri, bytes.NewReader(body), rawContentType)
+		return r.openExtractedHTML(ctx, uri, bytes.NewReader(got.body), got.contentType)
 	case mediaKindPassthrough:
-		return io.NopCloser(bytes.NewReader(body)), nil
+		return io.NopCloser(bytes.NewReader(got.body)), nil
 	default:
 		if contentType == "" {
 			return nil, fmt.Errorf("未対応のContent-Typeです: %s", uri)

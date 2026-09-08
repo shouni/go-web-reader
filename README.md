@@ -78,8 +78,10 @@ defer func() { _ = r.Close() }()
 body, err := r.ReadAll(ctx, "https://example.com/article") // gs:// / s3:// も同じ呼び方
 ```
 
-大きなオブジェクトを流したいときは `Open(ctx, uri)` が `io.ReadCloser` を返します。`io.ReadAll` で
-文字列にせず `io.Copy` で流せば、消費メモリはコピーバッファ分で済みます。
+大きなオブジェクトを流したいときは `Open(ctx, uri)` が `io.ReadCloser` を返します。**ストリームになるのは
+`gs://` / `s3://` だけです** — `io.Copy` で流せば消費メモリはコピーバッファ分で済みます。HTTP(S) は本文抽出と
+再試行のためにレスポンスを読み切ってから返すので、`Open` が返った時点でボディ全体（上限は `go-http-kit` の
+レスポンスサイズ上限）がメモリ上にあり、`io.Copy` しても節約にはなりません。
 
 `reader.New()` はエラーを返しません。ここで確立する外部接続がないためです。GCS/S3 クライアントは対象スキームの
 初回 `Open` まで作られず、失敗するとしたらそちらです。**`Close` は終端です** — 解放後の `Open` は
@@ -112,7 +114,8 @@ body, err := r.ReadAll(ctx, "https://example.com/article") // gs:// / s3:// も�
 HTTP(S) では、レスポンスの media type で挙動が決まります。
 
 * `text/html`, `application/xhtml+xml` — 抽出エンジンにかけ、**本文テキストのみ**を返す
-* `text/plain`, `text/markdown`, `text/x-markdown` — 変換せずそのまま返す
+* `text/plain`, `text/markdown`, `text/x-markdown`, `text/csv`, `application/json`, `application/xml`,
+  `text/xml` — 変換せずそのまま返す
 * `image/*`（サブタイプ不問） — 変換せず生バイト列のまま返す
 * 上記以外 — 未対応エラー
 

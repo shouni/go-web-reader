@@ -262,7 +262,7 @@ func TestReadAllPropagatesOpenError(t *testing.T) {
 	t.Parallel()
 
 	r := newTestReader(t, &stubExtractor{}, WithHTTPClient(&stubHTTPClient{
-		contentType: "application/json",
+		contentType: "application/octet-stream",
 		body:        `{}`,
 	}))
 

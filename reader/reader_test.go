@@ -326,7 +326,7 @@ func TestReadHTTPUnsupportedContentTypeReturnsError(t *testing.T) {
 
 	extractor := &stubExtractor{text: "html text", hasBody: true}
 	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
-		contentType: "application/json",
+		contentType: "application/octet-stream",
 		body:        `{"message":"nope"}`,
 	}))
 
@@ -775,7 +775,7 @@ func TestResolveMediaType(t *testing.T) {
 		{name: "malformed but known", contentType: `text/html; charset="`, want: "text/html"},
 		{name: "malformed but known image", contentType: `image/jpeg; foo="`, want: "image/jpeg"},
 		{name: "malformed and unknown", contentType: `text/html-sandboxed; charset="`, wantErr: true},
-		{name: "malformed and unsupported", contentType: `application/json; charset="`, wantErr: true},
+		{name: "malformed and unsupported", contentType: `application/octet-stream; charset="`, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -813,7 +813,11 @@ func TestClassifyMediaType(t *testing.T) {
 		{mediaType: "text/x-markdown", want: mediaKindPassthrough},
 		{mediaType: "image/png", want: mediaKindPassthrough},
 		{mediaType: "image/svg+xml", want: mediaKindPassthrough},
-		{mediaType: "application/json", want: mediaKindUnsupported},
+		{mediaType: "text/csv", want: mediaKindPassthrough},
+		{mediaType: "application/json", want: mediaKindPassthrough},
+		{mediaType: "application/xml", want: mediaKindPassthrough},
+		{mediaType: "text/xml", want: mediaKindPassthrough},
+		{mediaType: "application/octet-stream", want: mediaKindUnsupported},
 		{mediaType: "text/html-sandboxed", want: mediaKindUnsupported},
 		{mediaType: "", want: mediaKindUnsupported},
 	}
