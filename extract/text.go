@@ -23,7 +23,6 @@ func processGeneralElement(s *goquery.Selection) string {
 		return ""
 	}
 
-	// リスト項目や定義語は短くても項目として意味を持つため、長さで落としません。
 	if _, isShort := shortTagSet[tag]; isShort {
 		return content
 	}
@@ -34,10 +33,8 @@ func processGeneralElement(s *goquery.Selection) string {
 }
 
 // ownText は s 配下のテキストのうち、s 自身が担当する分だけを連結します。
-//
-// 子孫のブロック要素（blockTags）は走査対象として別途訪問されるため、ここでは
-// 中身に立ち入りません。除外しないと <li><p>…</p></li> のような入れ子で
-// 親と子の両方が同じ文を出力し、本文が二重になります。
+// 子孫のブロック要素は別途訪問されるので立ち入りません。立ち入ると
+// <li><p>…</p></li> で親と子が同じ文を出します。
 func ownText(s *goquery.Selection) string {
 	var builder strings.Builder
 	for _, node := range s.Nodes {
@@ -47,10 +44,7 @@ func ownText(s *goquery.Selection) string {
 }
 
 // writeOwnText は n の子孫のテキストを、ブロック要素の内側を除いて builder に書き出します。
-//
-// goquery を介さず html.Node を直接辿ります。Contents().Each(...) は子ノードごとに
-// Selection を確保するうえ、Is(セレクタ文字列) はノードごとにセレクタを
-// コンパイルし直すため、文書全体を歩くこの経路では割に合いません。
+// goquery の Contents().Each は子ノードごとに Selection を確保するため、html.Node を直接辿ります。
 func writeOwnText(builder *strings.Builder, n *html.Node) {
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		switch child.Type {
@@ -60,50 +54,17 @@ func writeOwnText(builder *strings.Builder, n *html.Node) {
 			if _, isBlock := blockTagSet[child.Data]; isBlock {
 				continue
 			}
-			// <br> は改行そのものなので、区切りを入れないと前後の行が
-			// 1 語に融合します（"line1<br>line2" → "line1line2"）。
-			// 後段の normalizeSpace が連続空白をまとめるため、空白 1 個で足ります。
+			// <br> を空白にしないと前後の行が 1 語に融合する（"line1<br>line2" → "line1line2"）。
 			if child.Data == "br" {
 				builder.WriteByte(' ')
 				continue
 			}
 			writeOwnText(builder, child)
 		}
-		// コメントノードやDOCTYPEなどは無視
 	}
 }
 
-// normalizeSpace は連続する空白（改行やタブを含む）を単一のスペースにまとめ、
-// 前後の空白を落とします。HTML のインデントがそのまま本文に出るのを防ぎます。
+// normalizeSpace は連続する空白（改行やタブを含む）を 1 個のスペースにまとめ、前後の空白を落とします。
 func normalizeSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
-}
-
-// processTable は goquery.Selection からテーブルの内容を抽出し、整形します。
-func processTable(s *goquery.Selection) string {
-	var tableContent []string
-	captionText := strings.TrimSpace(s.FindMatcher(captionMatcher).First().Text())
-	if captionText != "" {
-		tableContent = append(tableContent, tableCaptionPrefix+captionText)
-	}
-	s.FindMatcher(rowMatcher).Each(func(_ int, row *goquery.Selection) {
-		var rowTexts []string
-		hasValue := false
-		row.FindMatcher(cellMatcher).Each(func(_ int, cell *goquery.Selection) {
-			cellText := normalizeSpace(cell.Text())
-			if cellText != "" {
-				hasValue = true
-			}
-			rowTexts = append(rowTexts, cellText)
-		})
-		// セルの無い行や全セルが空の行は、出力では空行にしかなりません。
-		if !hasValue {
-			return
-		}
-		tableContent = append(tableContent, strings.Join(rowTexts, " | "))
-	})
-	if len(tableContent) > 0 {
-		return strings.Join(tableContent, "\n")
-	}
-	return ""
 }

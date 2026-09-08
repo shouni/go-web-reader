@@ -2,205 +2,12 @@ package reader
 
 import (
 	"context"
-	"errors"
 	"io"
-	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
 
-var (
-	_ HTTPClient           = (*scriptedHTTPClient)(nil)
-	_ RetryClassifier      = (*neverRetryClient)(nil)
-	_ ContentTypeExtractor = (*contentTypeExtractorStub)(nil)
-)
-
-// response は scriptedHTTPClient が 1 回の Do で返す内容です。
-type response struct {
-	statusCode  int
-	contentType string
-	body        string
-	err         error
-}
-
-// scriptedHTTPClient は呼ばれるたびに次の応答を返します。
-// 台本を使い切ったあとは最後の応答を繰り返すため、「何回目で成功したか」を
-// 数える用途でも、リトライ回数の上限を確かめる用途でも使えます。
-type scriptedHTTPClient struct {
-	script []response
-	calls  int
-}
-
-func (c *scriptedHTTPClient) Do(*http.Request) (*http.Response, error) {
-	res := c.script[min(c.calls, len(c.script)-1)]
-	c.calls++
-
-	if res.err != nil {
-		return nil, res.err
-	}
-	statusCode := res.statusCode
-	if statusCode == 0 {
-		statusCode = http.StatusOK
-	}
-	resp := &http.Response{
-		StatusCode: statusCode,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader(res.body)),
-	}
-	if res.contentType != "" {
-		resp.Header.Set("Content-Type", res.contentType)
-	}
-	return resp, nil
-}
-
-// newRetryingTestReader は、待ち時間をテスト向けに詰めたリーダーを返します。
-func newRetryingTestReader(t *testing.T, client HTTPClient, opts ...Option) *UniversalReader {
-	t.Helper()
-
-	baseOpts := []Option{
-		WithHTTPClient(client),
-		WithRetryInterval(time.Millisecond, 2*time.Millisecond),
-	}
-
-	return newTestReader(t, &stubExtractor{text: "extracted", hasBody: true}, append(baseOpts, opts...)...)
-}
-
-// 一時的な失敗（5xx / 通信エラー）はやり直すこと。
-// 既定のクライアントはリトライ付きで構築されますが、Do を直接呼ぶ経路には
-// リトライが掛からないため、取得のやり直しは reader 側の責任です。
-func TestFetchRetriesTransientFailures(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		script []response
-	}{
-		{
-			name: "server error",
-			script: []response{
-				{statusCode: http.StatusServiceUnavailable, body: "unavailable"},
-				{statusCode: http.StatusBadGateway, body: "bad gateway"},
-				{contentType: "text/plain", body: "recovered"},
-			},
-		},
-		{
-			name: "transport error",
-			script: []response{
-				{err: errors.New("connection reset by peer")},
-				{err: errors.New("connection reset by peer")},
-				{contentType: "text/plain", body: "recovered"},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			client := &scriptedHTTPClient{script: tt.script}
-			r := newRetryingTestReader(t, client)
-
-			body, err := r.ReadAll(context.Background(), "https://example.com/flaky")
-			if err != nil {
-				t.Fatalf("ReadAll() error = %v", err)
-			}
-			if got := string(body); got != "recovered" {
-				t.Fatalf("body = %q, want %q", got, "recovered")
-			}
-			if client.calls != 3 {
-				t.Fatalf("client.calls = %d, want 3", client.calls)
-			}
-		})
-	}
-}
-
-// 繰り返しても結果が変わらない失敗はやり直さないこと。
-func TestFetchDoesNotRetryPermanentFailures(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		statusCode int
-	}{
-		{name: "not found", statusCode: http.StatusNotFound},
-		{name: "forbidden", statusCode: http.StatusForbidden},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			client := &scriptedHTTPClient{script: []response{{statusCode: tt.statusCode, body: "nope"}}}
-			r := newRetryingTestReader(t, client)
-
-			if _, err := r.Open(context.Background(), "https://example.com/missing"); err == nil {
-				t.Fatal("Open() error = nil, want error")
-			}
-			if client.calls != 1 {
-				t.Fatalf("client.calls = %d, want 1", client.calls)
-			}
-		})
-	}
-}
-
-// WithMaxRetries(0) はやり直しを止めること。
-// 自前のリトライ付きクライアントを注入する利用者が、二重に待たされないための口です。
-func TestFetchRetryCanBeDisabled(t *testing.T) {
-	t.Parallel()
-
-	client := &scriptedHTTPClient{script: []response{{statusCode: http.StatusServiceUnavailable, body: "unavailable"}}}
-	r := newRetryingTestReader(t, client, WithMaxRetries(0))
-
-	if _, err := r.Open(context.Background(), "https://example.com/flaky"); err == nil {
-		t.Fatal("Open() error = nil, want error")
-	}
-	if client.calls != 1 {
-		t.Fatalf("client.calls = %d, want 1", client.calls)
-	}
-}
-
-// リトライ回数の上限を超えないこと（初回 + WithMaxRetries 回）。
-func TestFetchStopsAtMaxRetries(t *testing.T) {
-	t.Parallel()
-
-	client := &scriptedHTTPClient{script: []response{{statusCode: http.StatusServiceUnavailable, body: "unavailable"}}}
-	r := newRetryingTestReader(t, client, WithMaxRetries(3))
-
-	if _, err := r.Open(context.Background(), "https://example.com/flaky"); err == nil {
-		t.Fatal("Open() error = nil, want error")
-	}
-	if client.calls != 4 {
-		t.Fatalf("client.calls = %d, want 4 (初回 + 3 回)", client.calls)
-	}
-}
-
-// neverRetryClient は、自分の返すエラーを「やり直す価値なし」と判断するクライアントです。
-type neverRetryClient struct {
-	scriptedHTTPClient
-}
-
-func (c *neverRetryClient) IsHTTPRetryableError(error) bool { return false }
-
-// クライアント自身がリトライ可否を判断できるなら、その判断に従うこと。
-// エラーの型を知っているのはそれを返したクライアントです。
-func TestFetchDefersToClientRetryClassification(t *testing.T) {
-	t.Parallel()
-
-	client := &neverRetryClient{
-		scriptedHTTPClient: scriptedHTTPClient{
-			script: []response{{statusCode: http.StatusServiceUnavailable, body: "unavailable"}},
-		},
-	}
-	r := newRetryingTestReader(t, client)
-
-	if _, err := r.Open(context.Background(), "https://example.com/flaky"); err == nil {
-		t.Fatal("Open() error = nil, want error")
-	}
-	if client.calls != 1 {
-		t.Fatalf("client.calls = %d, want 1", client.calls)
-	}
-}
+var _ ContentTypeExtractor = (*contentTypeExtractorStub)(nil)
 
 // contentTypeExtractorStub は Content-Type も受け取れる抽出器です。
 type contentTypeExtractorStub struct {
@@ -213,6 +20,37 @@ func (s *contentTypeExtractorStub) ExtractWithContentType(ctx context.Context, r
 	s.gotContentType = contentType
 	s.calls++
 	return s.Extract(ctx, r)
+}
+
+func TestOpenHTTPUsesExtractor(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "hello world", hasBody: true}
+	httpClient := &stubHTTPClient{contentType: "text/html; charset=utf-8", body: "<html></html>"}
+	r := newTestReader(t, extractor, WithHTTPClient(httpClient))
+
+	stream, err := r.Open(context.Background(), "https://example.com/article")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "hello world" {
+		t.Fatalf("body = %q, want %q", got, "hello world")
+	}
+	if extractor.extractCalls != 1 {
+		t.Fatalf("extractor.extractCalls = %d, want 1", extractor.extractCalls)
+	}
+	if extractor.extractedBody != "<html></html>" {
+		t.Fatalf("extractor.extractedBody = %q", extractor.extractedBody)
+	}
+	if httpClient.calls != 1 {
+		t.Fatalf("httpClient.calls = %d, want 1", httpClient.calls)
+	}
 }
 
 // 抽出器が Content-Type を受け取れるなら、解析済みの media type ではなく
@@ -240,53 +78,243 @@ func TestExtractorReceivesRawContentType(t *testing.T) {
 	}
 }
 
-// ReadAll は開いて読み切って閉じるまでを行うこと。
-func TestReadAllReadsWholeContent(t *testing.T) {
+func TestOpenHTTPPlainTextReturnsBodyWithoutExtractor(t *testing.T) {
 	t.Parallel()
 
-	r := newTestReader(t, &stubExtractor{}, WithHTTPClient(&stubHTTPClient{
-		contentType: "text/plain",
+	extractor := &stubExtractor{text: "html text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: "text/plain; charset=utf-8",
 		body:        "plain body",
 	}))
 
-	body, err := r.ReadAll(context.Background(), "https://example.com/a.txt")
+	stream, err := r.Open(context.Background(), "https://example.com/plain.txt")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
 	if got := string(body); got != "plain body" {
 		t.Fatalf("body = %q, want %q", got, "plain body")
 	}
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
+	}
 }
 
-func TestReadAllPropagatesOpenError(t *testing.T) {
+func TestOpenHTTPMarkdownReturnsBodyWithoutExtractor(t *testing.T) {
 	t.Parallel()
 
-	r := newTestReader(t, &stubExtractor{}, WithHTTPClient(&stubHTTPClient{
-		contentType: "application/json",
-		body:        `{}`,
+	extractor := &stubExtractor{text: "html text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: "text/markdown; charset=utf-8",
+		body:        "# Title\n\nmarkdown body",
 	}))
 
-	if _, err := r.ReadAll(context.Background(), "https://example.com/a.json"); err == nil {
-		t.Fatal("ReadAll() error = nil, want error")
+	stream, err := r.Open(context.Background(), "https://example.com/README.md")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "# Title\n\nmarkdown body" {
+		t.Fatalf("body = %q", got)
+	}
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
 	}
 }
 
-// Close は終端であり、解放するものが無い HTTP でも終端であること。
-// 以前は storages 側にしか印が無く、Close 後も https:// だけ読めていました。
-func TestOpenHTTPAfterCloseIsRejected(t *testing.T) {
+func TestOpenHTTPImageReturnsBodyWithoutExtractor(t *testing.T) {
 	t.Parallel()
 
-	client := &stubHTTPClient{contentType: "text/plain", body: "plain body"}
-	r := newTestReader(t, &stubExtractor{}, WithHTTPClient(client))
+	extractor := &stubExtractor{text: "html text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: "image/png",
+		body:        "fake-png-bytes",
+	}))
 
-	if err := r.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	stream, err := r.Open(context.Background(), "https://example.com/photo.png")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "fake-png-bytes" {
+		t.Fatalf("body = %q, want %q", got, "fake-png-bytes")
+	}
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
+	}
+}
+
+func TestOpenHTTPUnsupportedContentTypeReturnsError(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "html text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: "application/octet-stream",
+		body:        `{"message":"nope"}`,
+	}))
+
+	_, err := r.Open(context.Background(), "https://example.com/data.json")
+	if err == nil {
+		t.Fatal("Open() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "未対応のContent-Type") {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
+	}
+}
+
+func TestOpenHTTPFallsBackForMalformedContentType(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "fallback text", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: `text/html; charset="`,
+		body:        "<html>fallback</html>",
+	}))
+
+	stream, err := r.Open(context.Background(), "https://example.com/malformed-content-type")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer stream.Close()
+
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got := string(body); got != "fallback text" {
+		t.Fatalf("body = %q, want %q", got, "fallback text")
+	}
+	if extractor.extractCalls != 1 {
+		t.Fatalf("extractor.extractCalls = %d, want 1", extractor.extractCalls)
+	}
+}
+
+func TestOpenHTTPMalformedContentTypeDoesNotFallbackOnPartialMatch(t *testing.T) {
+	t.Parallel()
+
+	extractor := &stubExtractor{text: "unexpected", hasBody: true}
+	r := newTestReader(t, extractor, WithHTTPClient(&stubHTTPClient{
+		contentType: `text/html-sandboxed; charset="`,
+		body:        "<html>unexpected</html>",
+	}))
+
+	_, err := r.Open(context.Background(), "https://example.com/bad-content-type")
+	if err == nil {
+		t.Fatal("Open() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "Content-Typeの解析に失敗しました") {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if extractor.extractCalls != 0 {
+		t.Fatalf("extractor.extractCalls = %d, want 0", extractor.extractCalls)
+	}
+}
+
+func TestOpenHTTPNoBodyReturnsError(t *testing.T) {
+	t.Parallel()
+
+	r := newTestReader(t,
+		&stubExtractor{hasBody: false},
+		WithHTTPClient(&stubHTTPClient{contentType: "application/xhtml+xml"}),
+	)
+
+	_, err := r.Open(context.Background(), "https://example.com/empty")
+	if err == nil {
+		t.Fatal("Open() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "コンテンツが見つかりませんでした") {
+		t.Fatalf("Open() error = %v", err)
+	}
+}
+
+func TestResolveMediaType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		contentType string
+		want        string
+		wantErr     bool
+	}{
+		{name: "empty header", contentType: "", want: ""},
+		{name: "with charset", contentType: "text/html; charset=utf-8", want: "text/html"},
+		{name: "uppercase", contentType: "TEXT/HTML", want: "text/html"},
+		{name: "no parameters", contentType: "image/png", want: "image/png"},
+		{name: "malformed but known", contentType: `text/html; charset="`, want: "text/html"},
+		{name: "malformed but known image", contentType: `image/jpeg; foo="`, want: "image/jpeg"},
+		{name: "malformed and unknown", contentType: `text/html-sandboxed; charset="`, wantErr: true},
+		{name: "malformed and unsupported", contentType: `application/octet-stream; charset="`, wantErr: true},
 	}
 
-	if _, err := r.Open(context.Background(), "https://example.com/a.txt"); !errors.Is(err, ErrClosed) {
-		t.Fatalf("Open() after Close error = %v, want ErrClosed", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := resolveMediaType(tt.contentType)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolveMediaType(%q) error = nil, want error", tt.contentType)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveMediaType(%q) error = %v", tt.contentType, err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveMediaType(%q) = %q, want %q", tt.contentType, got, tt.want)
+			}
+		})
 	}
-	if client.calls != 0 {
-		t.Fatalf("client.calls = %d, want 0 (Close 後に取得してはいけない)", client.calls)
+}
+
+func TestClassifyMediaType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		mediaType string
+		want      mediaKind
+	}{
+		{mediaType: "text/html", want: mediaKindHTML},
+		{mediaType: "application/xhtml+xml", want: mediaKindHTML},
+		{mediaType: "text/plain", want: mediaKindPassthrough},
+		{mediaType: "text/markdown", want: mediaKindPassthrough},
+		{mediaType: "text/x-markdown", want: mediaKindPassthrough},
+		{mediaType: "image/png", want: mediaKindPassthrough},
+		{mediaType: "image/svg+xml", want: mediaKindPassthrough},
+		{mediaType: "text/csv", want: mediaKindPassthrough},
+		{mediaType: "application/json", want: mediaKindPassthrough},
+		{mediaType: "application/xml", want: mediaKindPassthrough},
+		{mediaType: "text/xml", want: mediaKindPassthrough},
+		{mediaType: "application/octet-stream", want: mediaKindUnsupported},
+		{mediaType: "text/html-sandboxed", want: mediaKindUnsupported},
+		{mediaType: "", want: mediaKindUnsupported},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.mediaType, func(t *testing.T) {
+			t.Parallel()
+
+			if got := classifyMediaType(tt.mediaType); got != tt.want {
+				t.Fatalf("classifyMediaType(%q) = %v, want %v", tt.mediaType, got, tt.want)
+			}
+		})
 	}
 }

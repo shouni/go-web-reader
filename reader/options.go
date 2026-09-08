@@ -33,23 +33,24 @@ type Extractor interface {
 
 // ContentTypeExtractor は、Content-Type ヘッダーも受け取れる抽出器です。
 //
-// Extractor とは別の口ではなく、同じ WithExtractor に渡された抽出器が
-// 追加で持てる能力です。実装していれば Extract の代わりにこちらが呼ばれ、
-// 実装していない抽出器は今までどおり Extract が呼ばれます。
+// 別の口ではなく、WithExtractor に渡した抽出器が追加で持てる能力です。
+// 満たしていれば Extract の代わりにこちらが呼ばれます。
 //
-// 分けているのは Extractor の互換性のためだけではありません。文字コードの
-// 変換は 1 箇所でしか行えず（UTF-8 に直したバイト列をもう一度 Shift_JIS として
-// 解釈し直せば壊れます）、その 1 箇所は <meta charset> を読める抽出器側です。
-// reader が持つ Content-Type は判定材料として渡すだけに留めます。
+// 文字コードの変換は <meta charset> を読める抽出器側の 1 箇所でしか行えないため
+// （UTF-8 に直したバイト列を再度 Shift_JIS と解釈すれば壊れます）、
+// reader は Content-Type を判定材料として渡すだけで変換はしません。
 type ContentTypeExtractor interface {
 	ExtractWithContentType(ctx context.Context, r io.Reader, contentType string) (text string, hasBody bool, err error)
 }
 
+// HTTPClient は HTTP リクエストを実行する最小インターフェースです。
+type HTTPClient interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 // RetryClassifier は、取得の失敗を再試行すべきか判断できる HTTP クライアントです。
-//
-// HTTPClient が実装していればその判断を優先します。エラーの型を知っているのは
-// それを返したクライアント自身なので、既定の httpkit.Client を使う限り
-// リトライ対象の定義が reader と httpkit で二重管理になりません。
+// HTTPClient が満たしていればその判断を優先します。エラーの型を知っているのは
+// それを返したクライアントなので、リトライ対象の定義を reader 側で二重管理しません。
 type RetryClassifier interface {
 	IsHTTPRetryableError(err error) bool
 }
@@ -62,10 +63,11 @@ type SafeURLValidator func(context.Context, string) error
 // 実際の接続確立を伴うため、対象スキームの初回 Open 時にだけ呼ばれます。
 type StorageFactory func(context.Context) (remoteio.Factory, error)
 
-// HTTPClient は HTTP リクエストを実行する最小インターフェースです。
-type HTTPClient interface {
-	Do(*http.Request) (*http.Response, error)
-}
+// Option は UniversalReader の依存を差し替えるためのオプションです。
+//
+// nil の Option、および nil の値を渡した With* は無視され、既定値が保たれます。
+// 差し替えたつもりで既定のまま動くので、渡す値が nil でないことは呼び出し側で確かめてください。
+type Option func(*options)
 
 // retryPolicy は HTTP 取得の再試行設定です。
 // maxRetries が 0 のときは 1 度だけ実行し、再試行しません。
@@ -85,13 +87,10 @@ type options struct {
 }
 
 // newOptions は既定値にオプションを適用した設定を返します。
-//
-// 各 With* は nil の値を無視するため、設定フィールドが nil になる経路はありません。
-// New 側で改めて nil を検査しないのはこのためです。
+// 各 With* が nil を無視するため、フィールドが nil になる経路はなく、New は再検査しません。
 func newOptions(opts ...Option) options {
 	cfg := options{
-		// securenet.ValidateURL は可変長オプションを取るため、そのままでは
-		// SafeURLValidator に代入できない。既定ポリシーで呼ぶラッパを噛ませる。
+		// securenet.ValidateURL は可変長オプションを取るため、そのままでは代入できない。
 		safeURL: func(ctx context.Context, uri string) error {
 			return securenet.ValidateURL(ctx, uri)
 		},
@@ -112,13 +111,6 @@ func newOptions(opts ...Option) options {
 	}
 	return cfg
 }
-
-// Option は UniversalReader の依存を差し替えるためのオプションです。
-//
-// nil の Option、および nil の値を渡した With* は無視され、既定値が保たれます。
-// 差し替えたつもりで既定のまま動くことになるため、差し替え対象を組み立てる側で
-// nil にならないことを確かめてください。
-type Option func(*options)
 
 // WithMaxRetries は HTTP 取得を再試行する回数を設定します（初回の実行は含みません）。
 // 0 を渡すと再試行しません。
@@ -166,12 +158,11 @@ func WithExtractor(extractor Extractor) Option {
 
 // WithHTTPClient は HTTP(S) の取得に使うクライアントを差し替えます。
 //
-// リクエストのヘッダーを変えたい場合もここです。Do の中で受け取った
-// *http.Request のヘッダーを上書きしてから元のクライアントに委譲できます。
+// リクエストヘッダーを変えたい場合もここです。Do の中で *http.Request を
+// 書き換えてから元のクライアントに委譲してください。
 //
-// レスポンスサイズの上限は外れません。上限を掛けるのはクライアントの外側
-// （返ってきた *http.Response を読み切る go-http-kit の処理）なので、
-// どのクライアントに差し替えても、どの Content-Type でも等しくかかります。
+// レスポンスサイズの上限は外れません。上限はクライアントの外側（返ってきた
+// *http.Response を読み切る go-http-kit の処理）で掛かるためです。
 func WithHTTPClient(client HTTPClient) Option {
 	return func(o *options) {
 		if client != nil {
@@ -182,13 +173,11 @@ func WithHTTPClient(client HTTPClient) Option {
 
 // WithSafeURLValidator は URL 安全性検証関数を差し替えます。
 //
-// ここで渡した検証器が呼ばれるのは、スキームの振り分けの後、HTTP(S) の枝でだけです。
-// gs:// / s3:// は接続先をクラウド SDK が決めるため検証を通らず、ストレージ側の URI を
-// 弾くための口ではありません。
+// 検証器が呼ばれるのは HTTP(S) の枝だけです。gs:// / s3:// は接続先をクラウド SDK が
+// 決めるため検証を通らず、ストレージ側の URI を弾く口ではありません。
 //
-// ローカルのテストサーバーへ向けたい場合は、これと WithHTTPClient の両方を
-// 差し替えてください。検証器だけを緩めても、既定の HTTP クライアントが接続の直前に
-// 行う IP 検証で制限ネットワーク宛ての接続が落ちます。
+// ローカルのテストサーバーへ向けるなら WithHTTPClient も差し替えてください。
+// 検証器だけ緩めても、既定のクライアントが接続直前に行う IP 検証で落ちます。
 func WithSafeURLValidator(fn SafeURLValidator) Option {
 	return func(o *options) {
 		if fn != nil {

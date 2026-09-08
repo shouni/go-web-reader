@@ -84,8 +84,7 @@ func TestText(t *testing.T) {
 		},
 		{
 			// article/main が無いページでは、ページ全体を本文として扱いつつ
-			// ナビゲーションやフッターを落とすこと。以前は goquery の Not が
-			// 子孫に効かず、リンクが <li> として本文に混ざっていた。
+			// ナビゲーションやフッターを落とすこと。
 			name: "page_without_main_drops_navigation_and_footer",
 			html: `<html><head><title>No Main</title></head><body>
                    <nav><ul><li>Home</li><li>About</li></ul></nav>
@@ -134,6 +133,38 @@ func TestText(t *testing.T) {
 			expectedText: titlePrefix + "Table" + "\n\n" +
 				longParagraph + "\n\n" +
 				"A | B",
+			expectedBodyFound: true,
+		},
+		{
+			// セルの中の段落やリストは表の行としてだけ出し、表の外に重ねて出さないこと。
+			// リスト項目は区切りを挟んで平坦化する（"AB" に融合させない）。
+			name: "table_flattens_nested_blocks_once",
+			html: `<html><head><title>Table</title></head><body><main>
+                   <p>` + longParagraph + `</p>
+                   <table><tr>
+                     <td><p>` + longParagraph + `</p></td>
+                     <td><ul><li>A</li><li>B</li></ul></td>
+                   </tr></table>
+                   </main></body></html>`,
+			expectedText: titlePrefix + "Table" + "\n\n" +
+				longParagraph + "\n\n" +
+				longParagraph + " | A B",
+			expectedBodyFound: true,
+		},
+		{
+			// 入れ子の表は外側のセルの文字列として一度だけ出し、
+			// 内側の行やセルが外側の行に混ざらないこと。
+			name: "nested_table_is_emitted_once",
+			html: `<html><head><title>Table</title></head><body><main>
+                   <p>` + longParagraph + `</p>
+                   <table><caption>Outer</caption><tbody><tr>
+                     <td>Left</td>
+                     <td><table><caption>Inner</caption><tr><td>X</td><td>Y</td></tr></table></td>
+                   </tr></tbody></table>
+                   </main></body></html>`,
+			expectedText: titlePrefix + "Table" + "\n\n" +
+				longParagraph + "\n\n" +
+				tableCaptionPrefix + "Outer" + "\nLeft | Inner X Y",
 			expectedBodyFound: true,
 		},
 		{

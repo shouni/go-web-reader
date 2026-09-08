@@ -9,14 +9,13 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// ErrClosed は、Close 済みの UniversalReader を使おうとしたことを表します。
-var ErrClosed = fmt.Errorf("reader is closed")
-
 // storageReaderCache は 1 スキーム分のストレージリーダーを遅延初期化して保持します。
 //
-// ロックをリーダー本体ではなくキャッシュごとに持たせているのは、初期化に
-// 認証情報の解決などの I/O が伴うためです。共有ロックだと GCS の初期化が
-// 詰まっている間、S3 の Open や Close まで待たされます。
+// ロックをスキームごとに持つのは、初期化に認証情報の解決などの I/O が伴うためです。
+// 共有ロックだと GCS の初期化が詰まっている間、S3 の Open や Close まで待たされます。
+//
+// remoteio.Lazy では置き換えられません。ここで管理しているのは Factory の寿命
+// （Close と解放後の利用拒否）で、Lazy は Handler を包むだけで寿命を持ちません。
 type storageReaderCache struct {
 	label      string
 	newFactory StorageFactory
@@ -66,28 +65,23 @@ func newStorageReader(ctx context.Context, newFactory StorageFactory) (remoteio.
 		return nil, nil, fmt.Errorf("ストレージファクトリの生成に失敗: %w", err)
 	}
 
-	// Store は読み書き・一覧・署名までを 1 つに束ねますが、ここで要るのは Open だけです。
-	// 保持する型を remoteio.Reader に絞ってあるのは、このパッケージが
-	// 「読む」以上のことをしないと型で示すためです。
+	// 要るのは Open だけなので、保持する型は remoteio.Reader に絞る（読む以上のことをしないと型で示す）。
 	store, err := factory.Store()
+	if err == nil && store == nil {
+		err = fmt.Errorf("store is nil")
+	}
 	if err != nil {
+		// ファクトリはここでしか参照されないので、失敗したら閉じてから返す。
 		_ = factory.Close()
 		return nil, nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
-	}
-
-	if store == nil {
-		_ = factory.Close()
-		return nil, nil, fmt.Errorf("リーダーの生成に失敗: store is nil")
 	}
 
 	return store, factory, nil
 }
 
 // close は保持しているクローザーを閉じ、以後の利用を拒否します。
-//
-// io.Closer の慣習どおり Close は終端です。以前は解放後の Open が黙って
-// 初期化からやり直しており、ライブラリとして組み込んだ側からは
-// 「閉じたはずのものが接続を張り直す」ように見えていました。
+// io.Closer の慣習どおり終端です。解放後の Open が黙って初期化し直すと、
+// 組み込んだ側からは「閉じたはずのものが接続を張り直す」ように見えます。
 func (c *storageReaderCache) close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
