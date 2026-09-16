@@ -127,8 +127,8 @@ github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 h1:GHRpF1pTW19a
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5PCi+MFsC7HjREoAz1BU+Mq60+05gifQSsHSDG/8=
 github.com/shouni/go-http-kit v1.11.1 h1:t7CMhctYN9TVi3ke7OLd88tKJt6AMp7/w0Yh2FFGXzU=
 github.com/shouni/go-http-kit v1.11.1/go.mod h1:/5XK6+S8BTiqk1Mm22UEq4xZrYQohwjEi3isPrhWLLs=
-github.com/shouni/go-remote-io v1.11.4 h1:WKcYqpNhMYe7p7HSPJ9hkWFNShDqlTnEV4gb8TF061I=
-github.com/shouni/go-remote-io v1.11.4/go.mod h1:gMpbZ79KPGkjAS/Lb52luwyY78iAJ+K+tK71VD71Mwk=
+github.com/shouni/go-remote-io v1.11.5 h1:xCfZhvFFp5OX3+BZBLrEqoW6pyjRzhPYckt9fbbZtUI=
+github.com/shouni/go-remote-io v1.11.5/go.mod h1:Q+d3rVCfPQRUHEnamsmt5fhtGlruplRci4mYYcMQCwY=
 github.com/shouni/netarmor v1.4.1 h1:jteCxDB2QT545PlB8r3KIQb46hFLxJsW3PESG4ZddZg=
 github.com/shouni/netarmor v1.4.1/go.mod h1:BeqmhJtYfJ4bw0OpT5pu4HUXHkHHY6y5Wu0BDjsyr28=
 github.com/spiffe/go-spiffe/v2 v2.8.1 h1:eXZMLsu+3MLEPJyGJkolqtVrteZfQdUpOWj6LTiDl/E=
