@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shouni/go-http-kit/httpkit"
 	"github.com/shouni/go-http-kit/retry"
 )
 
@@ -225,6 +226,31 @@ func TestFetchHonorsRetryAfterWithinMaxInterval(t *testing.T) {
 	}
 	if client.calls != 2 {
 		t.Errorf("client.calls = %d, want 2", client.calls)
+	}
+}
+
+// nilResponseClient は (nil, nil) を返す、規約を守らない HTTPClient です。
+type nilResponseClient struct{ calls int }
+
+func (c *nilResponseClient) Do(*http.Request) (*http.Response, error) {
+	c.calls++
+	return nil, nil
+}
+
+// 差し替えたクライアントが (nil, nil) を返しても panic せず、ErrNilResponse で
+// 再試行なしに戻ること。ヘッダーを読む前に HandleResponse の nil チェックを通す配線です。
+func TestFetchRejectsNilResponseWithoutPanic(t *testing.T) {
+	t.Parallel()
+
+	client := &nilResponseClient{}
+	r := newRetryingTestReader(t, client, WithMaxRetries(3))
+
+	_, err := r.Open(context.Background(), "https://example.com/")
+	if !errors.Is(err, httpkit.ErrNilResponse) {
+		t.Fatalf("Open() error = %v, want httpkit.ErrNilResponse", err)
+	}
+	if client.calls != 1 {
+		t.Errorf("client.calls = %d, want 1（形の問題は再試行しない）", client.calls)
 	}
 }
 
