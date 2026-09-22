@@ -35,6 +35,9 @@ func (r *UniversalReader) fetchBytes(ctx context.Context, uri string) (fetched, 
 		retry.WithMaxRetries(r.retry.maxRetries),
 		retry.WithInitialInterval(r.retry.initialInterval),
 		retry.WithMaxInterval(r.retry.maxInterval),
+		// Retry-After にも同じ上限を掛ける。Open は同期 API で、叩く先は利用者が入力した
+		// URL なので、上限が無いと相手サーバーに待ち時間を決めさせることになる。
+		retry.WithMaxRetryAfter(r.retry.maxInterval),
 		retry.WithShouldRetry(r.shouldRetryFetch),
 	)
 }
@@ -52,12 +55,15 @@ func (r *UniversalReader) fetchOnce(ctx context.Context, uri string) (fetched, e
 		return fetched{}, fmt.Errorf("HTTPリクエスト失敗: %w", err)
 	}
 
-	contentType := resp.Header.Get("Content-Type")
-
-	// resp.Body の nil チェック・Close・サイズ上限は HandleResponse が行う（ここで Close すると二重になる）。
+	// resp 自体と resp.Body の nil チェック・Close・サイズ上限は HandleResponse が行う
+	// （ここで Close すると二重になる）。差し替えたクライアントが (nil, nil) を返す
+	// 場合があるので、ヘッダーを読むのはその後にする。
 	body, err := httpkit.HandleResponse(resp)
+	if err != nil {
+		return fetched{}, err
+	}
 
-	return fetched{body: body, contentType: contentType}, err
+	return fetched{body: body, contentType: resp.Header.Get("Content-Type")}, nil
 }
 
 // newHTTPRequest は reader 共通の HTTP GET リクエストを生成します。
