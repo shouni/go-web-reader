@@ -307,6 +307,50 @@ func TestReadAllReadsWholeContent(t *testing.T) {
 	}
 }
 
+// ReadAll に上限は無く、gs:// / s3:// は HTTP の 25MB も掛からない。上限つきの読み切りを
+// 各サービスが書いていたので、その手順（1 バイト多く読んで超過を見分ける）を固定する。
+func TestReadAllLimit(t *testing.T) {
+	t.Parallel()
+
+	r := newTestReader(t, &stubExtractor{}, WithHTTPClient(&stubHTTPClient{
+		contentType: "text/plain",
+		body:        "0123456789",
+	}))
+
+	if body, err := r.ReadAllLimit(context.Background(), "https://example.com/a.txt", 10); err != nil || string(body) != "0123456789" {
+		t.Errorf("ReadAllLimit(exact) = %q, %v; want the whole body, nil", body, err)
+	}
+	if _, err := r.ReadAllLimit(context.Background(), "https://example.com/a.txt", 9); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("ReadAllLimit(9) error = %v, want ErrTooLarge", err)
+	}
+	if _, err := r.ReadAllLimit(context.Background(), "https://example.com/a.txt", 0); err == nil {
+		t.Error("ReadAllLimit(0) error = nil, want error")
+	}
+}
+
+// ReadText は上限で切り捨て、多バイト文字の途中で切れた末尾を落とす。
+func TestReadTextTruncatesAtRuneBoundary(t *testing.T) {
+	t.Parallel()
+
+	r := newTestReader(t, &stubExtractor{}, WithHTTPClient(&stubHTTPClient{
+		contentType: "text/plain",
+		body:        "あいう", // 9 bytes
+	}))
+
+	text, truncated, err := r.ReadText(context.Background(), "https://example.com/a.txt", 4)
+	if err != nil {
+		t.Fatalf("ReadText() error = %v", err)
+	}
+	if !truncated || text != "あ" {
+		t.Errorf("ReadText(4) = %q, %v; want \"あ\", true", text, truncated)
+	}
+
+	text, truncated, err = r.ReadText(context.Background(), "https://example.com/a.txt", 9)
+	if err != nil || truncated || text != "あいう" {
+		t.Errorf("ReadText(9) = %q, %v, %v; want the whole body, false, nil", text, truncated, err)
+	}
+}
+
 func TestReadAllPropagatesOpenError(t *testing.T) {
 	t.Parallel()
 

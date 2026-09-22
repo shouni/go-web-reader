@@ -53,6 +53,11 @@ var (
 	titleMatcher       = cascadia.MustCompile("title")
 	bodyMatcher        = cascadia.MustCompile("body")
 
+	// containerMatcher は、段落要素を使わずに本文を直書きするページのための走査対象です。
+	// ブロック要素が 1 つも本文を出さなかったときにだけ使います（extract.go の
+	// collectContainerParagraphs）。
+	containerMatcher = cascadia.MustCompile("div, section, article")
+
 	blockTagSet   = newTagSet(blockTags)
 	headingTagSet = newTagSet(headingTags)
 	shortTagSet   = newTagSet(shortTags)

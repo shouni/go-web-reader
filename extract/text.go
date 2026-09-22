@@ -64,6 +64,23 @@ func writeOwnText(builder *strings.Builder, n *html.Node) {
 	}
 }
 
+// writeTextWithBreaks は n の子孫のテキストを builder に書き出し、<br> を改行にします。
+// 箱要素の直書き本文で、<br> が段落の区切りとして使われているのを拾うためです。
+func writeTextWithBreaks(builder *strings.Builder, n *html.Node) {
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		switch child.Type {
+		case html.TextNode:
+			builder.WriteString(child.Data)
+		case html.ElementNode:
+			if child.Data == "br" {
+				builder.WriteByte('\n')
+				continue
+			}
+			writeTextWithBreaks(builder, child)
+		}
+	}
+}
+
 // normalizeSpace は連続する空白（改行やタブを含む）を 1 個のスペースにまとめ、前後の空白を落とします。
 func normalizeSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")

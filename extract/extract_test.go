@@ -34,6 +34,21 @@ func TestText(t *testing.T) {
 			expectedBodyFound: false,
 		},
 		{
+			// 段落要素を使わず <div> と <br> で本文を書くページ。ブロックが 1 つも
+			// 本文を出さないときに限って、葉の箱要素の直下テキストを段落として拾う。
+			name:              "document_with_div_and_br_body",
+			html:              fmt.Sprintf(`<html><head><title>Old Blog</title></head><body><article><div class="entry">%s<br><br>%s<br>short</div></article></body></html>`, longParagraph, longParagraph),
+			expectedText:      titlePrefix + "Old Blog" + "\n\n" + longParagraph + "\n\n" + longParagraph,
+			expectedBodyFound: true,
+		},
+		{
+			// ブロック要素が 1 つでも本文を出せば、箱要素の端書きは拾わない。
+			name:              "document_with_p_ignores_div_text",
+			html:              fmt.Sprintf(`<html><head><title>Mixed</title></head><body><main><div>%s</div><p>%s</p></main></body></html>`, "箱要素に直接書かれた二十文字を超える端書きの文章です。", longParagraph),
+			expectedText:      titlePrefix + "Mixed" + "\n\n" + longParagraph,
+			expectedBodyFound: true,
+		},
+		{
 			name:              "document_with_main_content_and_title",
 			html:              fmt.Sprintf(`<html><head><title>Title</title></head><body><main><p>%s</p></main></body></html>`, longParagraph),
 			expectedText:      titlePrefix + "Title" + "\n\n" + longParagraph,

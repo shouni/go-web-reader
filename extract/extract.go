@@ -46,6 +46,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html/charset"
@@ -114,7 +115,9 @@ func extractContentText(doc *goquery.Document) (text string, hasBodyFound bool, 
 
 	// 入れ子のブロックは親子とも訪問される。二重に出さないのは ownText の役目で、
 	// 表の中身だけは表が行として出すので、ここで飛ばす。
-	findMainContent(doc).FindMatcher(blockMatcher).Each(func(_ int, s *goquery.Selection) {
+	mainContent := findMainContent(doc)
+	bodyStart := len(parts)
+	mainContent.FindMatcher(blockMatcher).Each(func(_ int, s *goquery.Selection) {
 		if insideTable(s.Get(0)) {
 			return
 		}
@@ -123,7 +126,41 @@ func extractContentText(doc *goquery.Document) (text string, hasBodyFound bool, 
 		}
 	})
 
+	// 段落要素を 1 つも使わず <div> と <br> で本文を書くページ（古いブログや CMS の
+	// 直書き）は、上の走査では丸ごと落ちる。ブロックが 1 つも本文を出さなかったときに
+	// 限って、葉の箱要素の直下テキストを段落として拾う。ブロックが 1 つでもあれば
+	// そちらを信じる（混在ページで箱の端書きまで拾わないため）。
+	if len(parts) == bodyStart {
+		parts = append(parts, collectContainerParagraphs(mainContent)...)
+	}
+
 	return validateAndFormatResult(parts)
+}
+
+// collectContainerParagraphs は、ブロック要素を子孫に持たない箱要素（div / section /
+// article）の直下テキストを、<br> の区切りごとに段落として集めます。
+// MinParagraphLength に満たない行は、<p> と同じ規則で落とします。
+func collectContainerParagraphs(root *goquery.Selection) []string {
+	var parts []string
+	root.FindMatcher(containerMatcher).Each(func(_ int, s *goquery.Selection) {
+		if insideTable(s.Get(0)) {
+			return
+		}
+		// 入れ子の箱は内側だけを見る。外側も拾うと同じ文が二度出る。
+		if s.FindMatcher(containerMatcher).Length() > 0 || s.FindMatcher(blockMatcher).Length() > 0 {
+			return
+		}
+		var builder strings.Builder
+		for _, node := range s.Nodes {
+			writeTextWithBreaks(&builder, node)
+		}
+		for line := range strings.SplitSeq(builder.String(), "\n") {
+			if content := normalizeSpace(line); utf8.RuneCountInString(content) >= MinParagraphLength {
+				parts = append(parts, content)
+			}
+		}
+	})
+	return parts
 }
 
 // findMainContent は本文が入っている範囲を返します。
