@@ -57,6 +57,8 @@ There is no shared `ports`/`types` package. `reader` declares the `HTTPClient` a
 
 ### Retry belongs to reader, not to the HTTP seam
 
+`ReadAll` has no size limit of its own: HTTP stops at `HandleResponse`'s 25MB, but `gs://` / `s3://` hand the stream straight through. `ReadAllLimit` (fail with `ErrTooLarge`) and `ReadText` (truncate at a UTF-8 boundary, report it) exist because two services were hand-rolling the same read-one-byte-more-than-the-limit dance around `Open`. Neither logs; a truncation is the caller's to record.
+
 `HTTPClient` の口は `Do` だけなので、リトライは `fetchBytes` が `go-http-kit/retry` で掛けます。既定の `httpkit.Client` も `Do` にはリトライを掛けないため、ここを持たないと既定構成でも一度も再試行されません。再試行の可否はクライアントが `RetryClassifier` を満たすならそちらに委ね、満たさないクライアント向けのフォールバックが `shouldRetryFetch` の後半です。待ち時間の既定値は httpkit（初期 5 秒・最大 30 秒）より短くしています — `Open` は同期 API だからです。同じ理由で `Retry-After` の指示にも `maxInterval` を上限として掛けています（`retry.WithMaxRetryAfter`）。backoff は指示値をそのまま待ち、`MaxInterval` では抑えられないので、これが無いと利用者が入力した URL の相手が `Retry-After: 3600` を返しただけで `Open` が ctx の期限まで戻りません。上限を超えたら待たずに `retry.ErrRetryAfterTooLong` で打ち切ります。
 
 ### Two selector lists, removed at different times
@@ -66,6 +68,8 @@ There is no shared `ports`/`types` package. `reader` declares the `HTTPClient` a
 ### Nested blocks are emitted once
 
 `FindMatcher(blockMatcher)` visits a parent and its matching descendants both (goquery dedupes *nodes*, not nested text). `ownText` refuses to descend into any child whose tag is in `blockTagSet`, because that child gets its own visit. `blockMatcher` and `blockTagSet` are both derived from `blockTags`; `shortTagSet` and `flattenBoundarySet` follow the same pattern. Don't hardcode any of them.
+
+**`div` is not in `blockTags`, and the fallback for `<div>`-written bodies is deliberately narrow.** Adding `div` to the block list would make every wrapper a paragraph and double-emit everything under it. Instead, `collectContainerParagraphs` runs only when the block scan produced no body at all: it takes leaf containers (`div`/`section`/`article` with no block or container descendants), splits their text at `<br>`, and applies `MinParagraphLength` like `<p>`. A page with even one real block keeps only the blocks — a mixed page's wrapper asides are not body. `document_with_div_and_br_body` / `document_with_p_ignores_div_text` pin both halves.
 
 表だけは逆向きです: 表の内側のブロック要素は走査で飛ばし（`insideTable`）、`processTable` がセルの文字列として平坦化します。`<td><p>…</p></td>` の `<p>` を個別に出すと行の文脈が失われ、短ければしきい値で消えるためです。
 

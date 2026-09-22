@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/shouni/go-remote-io/remoteio"
 	"github.com/shouni/netarmor/securenet"
@@ -25,6 +26,9 @@ const (
 
 // ErrClosed は、Close 済みの UniversalReader を使おうとしたことを表します。
 var ErrClosed = errors.New("reader is closed")
+
+// ErrTooLarge は、ReadAllLimit で内容が上限を超えたことを示します。
+var ErrTooLarge = errors.New("reader: content exceeds the size limit")
 
 // UniversalReader は URI の種類に応じて読み取りストリームを返します。
 type UniversalReader struct {
@@ -103,6 +107,66 @@ func (r *UniversalReader) ReadAll(ctx context.Context, uri string) ([]byte, erro
 	}
 
 	return data, nil
+}
+
+// ReadAllLimit は ReadAll と同じですが、内容が maxBytes を超えていれば ErrTooLarge を返します。
+//
+// ReadAll には上限がありません。HTTP は HandleResponse の 25MB で止まりますが、
+// gs:// と s3:// はストリームをそのまま渡すので、上限を掛けるのは呼び出し側の仕事に
+// なっていました。同じ「上限より 1 バイト多く読んで超過を見分ける」手順を各サービスが
+// 書いていたので、ここに置きます。切り捨てて使いたい場合は ReadText を使ってください。
+func (r *UniversalReader) ReadAllLimit(ctx context.Context, uri string, maxBytes int64) ([]byte, error) {
+	data, truncated, err := r.readLimited(ctx, uri, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	if truncated {
+		return nil, fmt.Errorf("%w: %s (limit: %d bytes)", ErrTooLarge, uri, maxBytes)
+	}
+	return data, nil
+}
+
+// ReadText は URI の内容を文字列として最大 maxBytes まで読み、上限を超えていれば
+// UTF-8 の文字境界で切り捨てて返します。第 2 戻り値は切り捨てたかどうかです。
+//
+// プロンプトに載せる本文のように「長すぎる分は落としてよい」用途のための口で、
+// 切り捨てたことは呼び出し側が記録・通知してください。ここでは黙って切ります。
+func (r *UniversalReader) ReadText(ctx context.Context, uri string, maxBytes int64) (string, bool, error) {
+	data, truncated, err := r.readLimited(ctx, uri, maxBytes)
+	if err != nil {
+		return "", false, err
+	}
+	if truncated {
+		// 上限で切った末尾は多バイト文字の途中でありうる。不完全なバイトを落とす。
+		for len(data) > 0 {
+			if r, size := utf8.DecodeLastRune(data); r == utf8.RuneError && size == 1 {
+				data = data[:len(data)-1]
+				continue
+			}
+			break
+		}
+	}
+	return string(data), truncated, nil
+}
+
+// readLimited は、上限より 1 バイト多く読んで、超過したかどうかを見分けます。
+func (r *UniversalReader) readLimited(ctx context.Context, uri string, maxBytes int64) (data []byte, truncated bool, err error) {
+	if maxBytes <= 0 {
+		return nil, false, fmt.Errorf("maxBytes must be positive: %d", maxBytes)
+	}
+	stream, err := r.Open(ctx, uri)
+	if err != nil {
+		return nil, false, err
+	}
+
+	data, readErr := io.ReadAll(io.LimitReader(stream, maxBytes+1))
+	if err := errors.Join(readErr, stream.Close()); err != nil {
+		return nil, false, fmt.Errorf("URIの読み込みに失敗しました (%s): %w", uri, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return data[:maxBytes], true, nil
+	}
+	return data, false, nil
 }
 
 // Close は内部で保持している外部リソースを解放します。
