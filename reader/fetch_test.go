@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shouni/go-http-kit/retry"
 )
 
 var (
@@ -19,6 +21,7 @@ var (
 type response struct {
 	statusCode  int
 	contentType string
+	retryAfter  string
 	body        string
 	err         error
 }
@@ -49,6 +52,9 @@ func (c *scriptedHTTPClient) Do(*http.Request) (*http.Response, error) {
 	}
 	if res.contentType != "" {
 		resp.Header.Set("Content-Type", res.contentType)
+	}
+	if res.retryAfter != "" {
+		resp.Header.Set("Retry-After", res.retryAfter)
 	}
 	return resp, nil
 }
@@ -178,6 +184,47 @@ func TestFetchStopsAtMaxRetries(t *testing.T) {
 	}
 	if client.calls != 4 {
 		t.Fatalf("client.calls = %d, want 4 (初回 + 3 回)", client.calls)
+	}
+}
+
+// 待機時間の上限を超える Retry-After には従わず、待たずに打ち切ること。
+// 叩く先は利用者が入力した URL なので、上限が無いと相手に待ち時間を決めさせることになります。
+func TestFetchStopsOnRetryAfterBeyondMaxInterval(t *testing.T) {
+	t.Parallel()
+
+	client := &scriptedHTTPClient{script: []response{
+		{statusCode: http.StatusTooManyRequests, retryAfter: "3600", body: "slow down"},
+	}}
+	r := newRetryingTestReader(t, client, WithMaxRetries(3), WithRetryInterval(time.Millisecond, 10*time.Millisecond))
+
+	start := time.Now()
+	_, err := r.Open(context.Background(), "https://example.com/throttled")
+	if !errors.Is(err, retry.ErrRetryAfterTooLong) {
+		t.Fatalf("Open() error = %v, want retry.ErrRetryAfterTooLong", err)
+	}
+	if client.calls != 1 {
+		t.Errorf("client.calls = %d, want 1", client.calls)
+	}
+	if waited := time.Since(start); waited > time.Second {
+		t.Errorf("打ち切るべきところで %v 待ちました", waited)
+	}
+}
+
+// 上限以内の Retry-After には従うこと。
+func TestFetchHonorsRetryAfterWithinMaxInterval(t *testing.T) {
+	t.Parallel()
+
+	client := &scriptedHTTPClient{script: []response{
+		{statusCode: http.StatusTooManyRequests, retryAfter: "1", body: "slow down"},
+		{statusCode: http.StatusOK, contentType: "text/plain", body: "ok"},
+	}}
+	r := newRetryingTestReader(t, client, WithMaxRetries(3), WithRetryInterval(time.Millisecond, 2*time.Second))
+
+	if _, err := r.Open(context.Background(), "https://example.com/throttled"); err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if client.calls != 2 {
+		t.Errorf("client.calls = %d, want 2", client.calls)
 	}
 }
 

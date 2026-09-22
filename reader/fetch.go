@@ -35,6 +35,9 @@ func (r *UniversalReader) fetchBytes(ctx context.Context, uri string) (fetched, 
 		retry.WithMaxRetries(r.retry.maxRetries),
 		retry.WithInitialInterval(r.retry.initialInterval),
 		retry.WithMaxInterval(r.retry.maxInterval),
+		// Retry-After にも同じ上限を掛ける。Open は同期 API で、叩く先は利用者が入力した
+		// URL なので、上限が無いと相手サーバーに待ち時間を決めさせることになる。
+		retry.WithMaxRetryAfter(r.retry.maxInterval),
 		retry.WithShouldRetry(r.shouldRetryFetch),
 	)
 }

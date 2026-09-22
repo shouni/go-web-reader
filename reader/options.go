@@ -119,8 +119,10 @@ func newOptions(opts ...Option) options {
 // 4xx やレスポンスサイズ超過は、同じリクエストを繰り返しても結果が変わらないため再試行しません。
 //
 // レスポンスに Retry-After があった場合、次の待機時間は指数バックオフの算出値ではなく
-// その指示値になります（WithRetryInterval で設定した間隔は使われません）。
-// サーバーが待てと言った時間より早く送り直しても、同じ拒否が返るだけだからです。
+// その指示値になります。サーバーが待てと言った時間より早く送り直しても、同じ拒否が
+// 返るだけだからです。ただし指示値が WithRetryInterval の上限を超える場合は、待たずに
+// 打ち切って retry.ErrRetryAfterTooLong を返します。叩く先は利用者が入力した URL で、
+// 上限が無いと相手に待ち時間を決めさせることになります。
 //
 // 既定のクライアントを WithHTTPClient で自前のリトライ付きクライアントに
 // 差し替える場合は、二重に待たないよう 0 を渡してください。
@@ -131,7 +133,8 @@ func WithMaxRetries(n uint) Option {
 }
 
 // WithRetryInterval は再試行までの待機時間（指数バックオフの初期値と上限）を設定します。
-// 0 以下の値は無視され、既定値が保たれます。
+// 0 以下の値は無視され、既定値が保たれます。上限は Retry-After の指示にも掛かります
+// （WithMaxRetries を参照）。
 func WithRetryInterval(initialInterval, maxInterval time.Duration) Option {
 	return func(o *options) {
 		if initialInterval > 0 {
