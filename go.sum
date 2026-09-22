@@ -125,10 +125,10 @@ github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 h1:GFCKgm
 github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10/go.mod h1:t/avpk3KcrXxUnYOhZhMXJlSEyie6gQbtLq5NM3loB8=
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 h1:GHRpF1pTW19a8tTFrMLUcfWwyC0pnifVo2ClaLq+hP8=
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5PCi+MFsC7HjREoAz1BU+Mq60+05gifQSsHSDG/8=
-github.com/shouni/go-http-kit v1.12.0 h1:6H0Ghz1zIeTiZL6SdGckrKhrRgmGllXaGDHl+3iHvns=
-github.com/shouni/go-http-kit v1.12.0/go.mod h1:jh/hCYrakDWTFdMxSZPH++TEqDBf1RYEREFLJmYgBe8=
-github.com/shouni/go-remote-io v1.11.9 h1:pzUtfMp7L4yRBJzvlDM3kv7DpGC5GyDTMfO/HUhvhVM=
-github.com/shouni/go-remote-io v1.11.9/go.mod h1:qcSUYOkJXf4qTRYF1kpV617XMQ4w8kpaPt1CGG/qAFM=
+github.com/shouni/go-http-kit v1.13.0 h1:VEf+ctSYuvVCRHXPaooPBKwGI+STOkkRIYRrGgERSrw=
+github.com/shouni/go-http-kit v1.13.0/go.mod h1:jh/hCYrakDWTFdMxSZPH++TEqDBf1RYEREFLJmYgBe8=
+github.com/shouni/go-remote-io v1.12.0 h1:jnrccBc3IJueggVZcpuRHQcLnq1RQ5+NdKbpU0o6978=
+github.com/shouni/go-remote-io v1.12.0/go.mod h1:qcSUYOkJXf4qTRYF1kpV617XMQ4w8kpaPt1CGG/qAFM=
 github.com/shouni/netarmor v1.4.2 h1:AFLOdui8gs7OD6HgAe1NPT5fuQXmYDC1dzuskSHHtOw=
 github.com/shouni/netarmor v1.4.2/go.mod h1:BeqmhJtYfJ4bw0OpT5pu4HUXHkHHY6y5Wu0BDjsyr28=
 github.com/spiffe/go-spiffe/v2 v2.8.1 h1:eXZMLsu+3MLEPJyGJkolqtVrteZfQdUpOWj6LTiDl/E=
