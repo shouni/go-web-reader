@@ -100,6 +100,10 @@ func (r *UniversalReader) extractText(ctx context.Context, body io.Reader, conte
 // RFC に沿わないヘッダー（charset の引用符の閉じ忘れなど、実在するサーバーが返すもの）
 // でも、";" より前が既知の media type なら採用します。未知のものまで救うと壊れたヘッダーを
 // 根拠に中身を誤解釈するので、その場合は解析エラーを返します。
+//
+// 救うのは "type/subtype" の形をしているものだけです。classifyMediaType は image/ を
+// 前方一致で通すため、この検査が無いと "image/ 0" のような壊れた値まで画像として
+// 扱われます（戻り値も media type として使えない文字列になります）。
 func resolveMediaType(contentType string) (string, error) {
 	if contentType == "" {
 		return "", nil
@@ -114,9 +118,35 @@ func resolveMediaType(contentType string) (string, error) {
 	if i := strings.IndexByte(normalized, ';'); i >= 0 {
 		normalized = strings.TrimSpace(normalized[:i])
 	}
-	if classifyMediaType(normalized) != mediaKindUnsupported {
+	if isMediaTypeToken(normalized) && classifyMediaType(normalized) != mediaKindUnsupported {
 		return normalized, nil
 	}
 
 	return "", err
+}
+
+// isMediaTypeToken は、値が "type/subtype" の形をしているかを返します。
+// RFC 9110 の token に沿って、空白・区切り文字・制御文字を認めません。
+func isMediaTypeToken(mediaType string) bool {
+	slash := strings.IndexByte(mediaType, '/')
+	if slash <= 0 || slash == len(mediaType)-1 {
+		return false
+	}
+	for i := range len(mediaType) {
+		if c := mediaType[i]; c != '/' && !isTokenChar(c) {
+			return false
+		}
+	}
+	return strings.IndexByte(mediaType[slash+1:], '/') < 0
+}
+
+// isTokenChar は、RFC 9110 の token を構成する文字かを返します。
+func isTokenChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		return true
+	case strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
+		return true
+	}
+	return false
 }
