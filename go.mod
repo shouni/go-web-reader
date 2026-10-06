@@ -6,7 +6,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/andybalholm/cascadia v1.3.5
 	github.com/shouni/go-http-kit v1.13.0
-	github.com/shouni/go-remote-io v1.13.2
+	github.com/shouni/go-remote-io v1.13.3
 	github.com/shouni/netarmor v1.4.2
 	golang.org/x/net v0.59.0
 )
@@ -28,7 +28,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.33.6 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.6 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.1 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.4.10 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.4.11 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.4 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.4 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.4 // indirect
