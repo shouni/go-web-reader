@@ -8,7 +8,7 @@ require (
 	github.com/shouni/go-http-kit v1.13.0
 	github.com/shouni/go-remote-io v1.13.3
 	github.com/shouni/netarmor v1.4.2
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 )
 
 require (
