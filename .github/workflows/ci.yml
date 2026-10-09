@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   ci:
-    uses: shouni/workflows/.github/workflows/go-ci.yml@v1
+    uses: shouni/workflows/.github/workflows/go-ci.yml@v1.5.0
     with:
       # HTML もヘッダーも、利用者が指定した URL の向こうから来る外部入力。
       fuzz-targets: "./extract#FuzzText ./reader#FuzzResolveMediaType"
