@@ -7,7 +7,7 @@ import (
 	"github.com/shouni/go-web-reader/reader"
 )
 
-// ネットワークに出るため Output は付けていません（コンパイルだけ行われます）。
+// It reaches the network, so it has no Output comment (it is only compiled).
 func ExampleUniversalReader_ReadAll() {
 	r := reader.New()
 	defer func() { _ = r.Close() }()

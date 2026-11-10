@@ -8,7 +8,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// processGeneralElement は一般的なテキスト要素からテキストを抽出し、整形します。
+// processGeneralElement extracts and formats the text of an ordinary text element.
 func processGeneralElement(s *goquery.Selection) string {
 	content := normalizeSpace(ownText(s))
 	if content == "" {
@@ -32,9 +32,9 @@ func processGeneralElement(s *goquery.Selection) string {
 	return ""
 }
 
-// ownText は s 配下のテキストのうち、s 自身が担当する分だけを連結します。
-// 子孫のブロック要素は別途訪問されるので立ち入りません。立ち入ると
-// <li><p>…</p></li> で親と子が同じ文を出します。
+// ownText concatenates only the part of the text under s that s itself is responsible for.
+// Descendant block elements are visited separately, so it does not descend into them; if it did,
+// <li><p>…</p></li> would have parent and child emit the same sentence.
 func ownText(s *goquery.Selection) string {
 	var builder strings.Builder
 	for _, node := range s.Nodes {
@@ -43,8 +43,8 @@ func ownText(s *goquery.Selection) string {
 	return builder.String()
 }
 
-// writeOwnText は n の子孫のテキストを、ブロック要素の内側を除いて builder に書き出します。
-// goquery の Contents().Each は子ノードごとに Selection を確保するため、html.Node を直接辿ります。
+// writeOwnText writes the text under n to builder, excluding the inside of block elements.
+// goquery's Contents().Each allocates a Selection per child node, so it walks html.Node directly.
 func writeOwnText(builder *strings.Builder, n *html.Node) {
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		switch child.Type {
@@ -54,7 +54,7 @@ func writeOwnText(builder *strings.Builder, n *html.Node) {
 			if _, isBlock := blockTagSet[child.Data]; isBlock {
 				continue
 			}
-			// <br> を空白にしないと前後の行が 1 語に融合する（"line1<br>line2" → "line1line2"）。
+			// Unless <br> becomes a space, the lines on either side fuse into one word ("line1<br>line2" → "line1line2").
 			if child.Data == "br" {
 				builder.WriteByte(' ')
 				continue
@@ -64,8 +64,8 @@ func writeOwnText(builder *strings.Builder, n *html.Node) {
 	}
 }
 
-// writeTextWithBreaks は n の子孫のテキストを builder に書き出し、<br> を改行にします。
-// 箱要素の直書き本文で、<br> が段落の区切りとして使われているのを拾うためです。
+// writeTextWithBreaks writes the text under n to builder, turning <br> into a newline.
+// It is for bodies written directly in container elements, where <br> serves as the paragraph break.
 func writeTextWithBreaks(builder *strings.Builder, n *html.Node) {
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		switch child.Type {
@@ -81,7 +81,7 @@ func writeTextWithBreaks(builder *strings.Builder, n *html.Node) {
 	}
 }
 
-// normalizeSpace は連続する空白（改行やタブを含む）を 1 個のスペースにまとめ、前後の空白を落とします。
+// normalizeSpace collapses runs of whitespace (newlines and tabs included) into one space and trims both ends.
 func normalizeSpace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }

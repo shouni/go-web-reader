@@ -10,11 +10,11 @@ import (
 )
 
 const (
-	// 本体コードの定数と完全に一致させる
+	// must match the implementation's constants exactly
 	titlePrefix        = "【記事タイトル】 "
 	tableCaptionPrefix = "【表題】 "
 
-	// 本文として抽出されるための十分な長さを持つパラグラフ
+	// a paragraph long enough to be extracted as body text
 	longParagraph = "This is a long paragraph with more than twenty characters and it should be extracted as body content."
 )
 
@@ -27,22 +27,22 @@ func TestText(t *testing.T) {
 		expectedError     bool
 	}{
 		{
-			// 短いテキストは本文と見なされないため、タイトルだけが残る
+			// short text is not considered body text, so only the title remains
 			name:              "document_with_title_only",
 			html:              `<html><head><title>Test Title</title></head><body><p>Short text</p></body></html>`,
 			expectedText:      titlePrefix + "Test Title",
 			expectedBodyFound: false,
 		},
 		{
-			// 段落要素を使わず <div> と <br> で本文を書くページ。ブロックが 1 つも
-			// 本文を出さないときに限って、葉の箱要素の直下テキストを段落として拾う。
+			// A page that writes its body with <div> and <br> and no paragraph elements. Only when no
+			// block produces body text is the direct text of leaf containers picked up as paragraphs.
 			name:              "document_with_div_and_br_body",
 			html:              fmt.Sprintf(`<html><head><title>Old Blog</title></head><body><article><div class="entry">%s<br><br>%s<br>short</div></article></body></html>`, longParagraph, longParagraph),
 			expectedText:      titlePrefix + "Old Blog" + "\n\n" + longParagraph + "\n\n" + longParagraph,
 			expectedBodyFound: true,
 		},
 		{
-			// ブロック要素が 1 つでも本文を出せば、箱要素の端書きは拾わない。
+			// If even one block element produces body text, container asides are not picked up.
 			name:              "document_with_p_ignores_div_text",
 			html:              fmt.Sprintf(`<html><head><title>Mixed</title></head><body><main><div>%s</div><p>%s</p></main></body></html>`, "箱要素に直接書かれた二十文字を超える端書きの文章です。", longParagraph),
 			expectedText:      titlePrefix + "Mixed" + "\n\n" + longParagraph,
@@ -69,7 +69,7 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// "Intro text" は MinParagraphLength より短いため無視される
+			// "Intro text" is shorter than MinParagraphLength, so it is ignored
 			name: "document_with_table_and_pre",
 			html: `<html><head><title>Code Table</title></head><body><main>
                    <article>
@@ -84,7 +84,7 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// リストアイテムは短くても抽出される
+			// list items are extracted even when short
 			name: "document_with_list_items",
 			html: `<html><head><title>List Test</title></head><body><main><ul><li>Item 1</li><li>Item 2</li></ul></main></body></html>`,
 			expectedText: titlePrefix + "List Test" + "\n\n" +
@@ -98,8 +98,8 @@ func TestText(t *testing.T) {
 			expectedError: true,
 		},
 		{
-			// article/main が無いページでは、ページ全体を本文として扱いつつ
-			// ナビゲーションやフッターを落とすこと。
+			// On a page without article/main, the whole page must be treated as the body while
+			// navigation and footers are dropped.
 			name: "page_without_main_drops_navigation_and_footer",
 			html: `<html><head><title>No Main</title></head><body>
                    <nav><ul><li>Home</li><li>About</li></ul></nav>
@@ -110,7 +110,7 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// 入れ子のブロック要素は親と子で二重に出力しないこと。
+			// Nested block elements must not be emitted twice, by parent and child.
 			name: "nested_blocks_are_not_duplicated",
 			html: `<html><head><title>Nested</title></head><body><main>
                    <ul><li><p>` + longParagraph + `</p></li></ul>
@@ -122,15 +122,15 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// しきい値は文字数で測ること。バイト数で測ると 10 文字（30 バイト）の
-			// 日本語がしきい値 20 を超えてしまい、本文として残る。
+			// Thresholds must be measured in characters. Measured in bytes, 10 characters (30 bytes)
+			// of Japanese would exceed the threshold of 20 and survive as body text.
 			name:              "japanese_paragraph_is_measured_in_runes",
 			html:              `<html><head><title>日本語</title></head><body><main><p>短い文です。ノイズ。</p></main></body></html>`,
 			expectedText:      titlePrefix + "日本語",
 			expectedBodyFound: false,
 		},
 		{
-			// 2 文字の日本語見出しは残ること（MinHeadingLength の下限）。
+			// A two-character Japanese heading must survive (the MinHeadingLength floor).
 			name: "short_japanese_heading_is_kept",
 			html: `<html><head><title>見出し</title></head><body><main>
                    <h2>概要</h2><p>` + longParagraph + `</p>
@@ -139,7 +139,7 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// セルの無い行は空行にせず落とすこと。
+			// A row with no cells must be dropped, not turned into a blank line.
 			name: "table_skips_rows_without_cells",
 			html: `<html><head><title>Table</title></head><body><main>
                    <p>` + longParagraph + `</p>
@@ -151,8 +151,8 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// セルの中の段落やリストは表の行としてだけ出し、表の外に重ねて出さないこと。
-			// リスト項目は区切りを挟んで平坦化する（"AB" に融合させない）。
+			// Paragraphs and lists inside cells must come out only as table rows, not again outside the table.
+			// List items are flattened with a separator (not fused into "AB").
 			name: "table_flattens_nested_blocks_once",
 			html: `<html><head><title>Table</title></head><body><main>
                    <p>` + longParagraph + `</p>
@@ -167,8 +167,8 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// 入れ子の表は外側のセルの文字列として一度だけ出し、
-			// 内側の行やセルが外側の行に混ざらないこと。
+			// A nested table must come out once, as the text of the outer cell, and its rows and cells
+			// must not mix into the outer rows.
 			name: "nested_table_is_emitted_once",
 			html: `<html><head><title>Table</title></head><body><main>
                    <p>` + longParagraph + `</p>
@@ -183,7 +183,7 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// <br> は改行そのものなので、前後の行が 1 語に融合しないこと。
+			// <br> is a line break itself, so the lines on either side must not fuse into one word.
 			name: "br_separates_adjacent_lines",
 			html: `<html><head><title>Break</title></head><body><main>
                    <p>The quick brown fox<br>jumps over the lazy dog.</p>
@@ -192,8 +192,8 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// noscript の中身はパーサからはただのテキストに見えるため、
-			// 落とさないと囲っている段落の本文に混ざる。
+			// The parser sees noscript's contents as plain text, so unless it is dropped it mixes into
+			// the enclosing paragraph's text.
 			name: "noscript_and_hidden_elements_are_dropped",
 			html: `<html><head><title>Noise</title></head><body><main>
                    <p><noscript>JavaScriptを有効にしてください。</noscript>` + longParagraph + `</p>
@@ -204,8 +204,8 @@ func TestText(t *testing.T) {
 			expectedBodyFound: true,
 		},
 		{
-			// 定義リストと図のキャプションも本文として拾うこと。
-			// li と同じく、短くても項目として意味を持つので長さでは落とさない。
+			// Definition lists and figure captions must be picked up as body text too.
+			// Like li, they carry meaning as items even when short, so length does not drop them.
 			name: "definition_list_and_figcaption_are_extracted",
 			html: `<html><head><title>Terms</title></head><body><main>
                    <dl><dt>SSRF</dt><dd>Server-Side Request Forgery</dd></dl>
@@ -225,25 +225,25 @@ func TestText(t *testing.T) {
 
 			if tc.expectedError {
 				if err == nil {
-					t.Fatalf("エラーが期待されていましたが、エラーがありませんでした")
+					t.Fatalf("expected an error, got none")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("予期せぬエラーが発生しました: %v", err)
+				t.Fatalf("unexpected error: %v", err)
 			}
 			if actualBodyFound != tc.expectedBodyFound {
 				t.Errorf("hasBodyFound = %v, want %v", actualBodyFound, tc.expectedBodyFound)
 			}
 			if actualText != tc.expectedText {
-				t.Errorf("抽出テキストが期待値と異なります\n got: %q\nwant: %q", actualText, tc.expectedText)
+				t.Errorf("extracted text differs from the expected text\n got: %q\nwant: %q", actualText, tc.expectedText)
 			}
 		})
 	}
 }
 
-// TestEngineDelegatesToText は、DI 用の Engine がゼロ値のまま
-// Text と同じ結果を返すことを確認します。
+// TestEngineDelegatesToText checks that the DI Engine, as a zero value, returns the same result as
+// Text.
 func TestEngineDelegatesToText(t *testing.T) {
 	body := "This paragraph is long enough to be treated as extracted article body."
 	doc := fmt.Sprintf(`<html><head><title>Reader Title</title></head><body><main><p>%s</p></main></body></html>`, body)
@@ -251,22 +251,22 @@ func TestEngineDelegatesToText(t *testing.T) {
 
 	actualText, actualBodyFound, err := extract.Engine{}.Extract(t.Context(), strings.NewReader(doc))
 	if err != nil {
-		t.Fatalf("予期せぬエラーが発生しました: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if !actualBodyFound {
 		t.Errorf("hasBodyFound = false, want true")
 	}
 	if actualText != want {
-		t.Errorf("抽出テキストが期待値と異なります\n got: %q\nwant: %q", actualText, want)
+		t.Errorf("extracted text differs from the expected text\n got: %q\nwant: %q", actualText, want)
 	}
 }
 
-// TestTextRespectsCanceledContext は、解析に入る前にキャンセルを検出することを確認します。
+// TestTextRespectsCanceledContext checks that cancellation is detected before parsing starts.
 func TestTextRespectsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	if _, _, err := extract.Text(ctx, strings.NewReader(`<html><body><p>ignored</p></body></html>`)); err == nil {
-		t.Fatal("キャンセル済み context ではエラーが期待されます")
+		t.Fatal("expected an error for a cancelled context")
 	}
 }

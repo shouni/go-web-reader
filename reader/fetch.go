@@ -10,19 +10,19 @@ import (
 	"github.com/shouni/go-http-kit/retry"
 )
 
-// fetched は 1 回の取得結果です。retry.RunValue が単一の値しか運べないため、
-// ボディと Content-Type を 1 つにまとめています。
+// fetched is the result of one fetch. retry.RunValue carries only a single value, so the body and the
+// Content-Type are bundled into one.
 type fetched struct {
 	body        []byte
 	contentType string
 }
 
-// fetchBytes は URI を GET し、一時的な失敗は指数バックオフで再試行します。
+// fetchBytes GETs the URI and retries transient failures with exponential backoff.
 //
-// リトライをここで持つのは、HTTPClient の口が Do だけで「同じ GET をやり直す」判断を
-// レスポンス 1 個からは下せないためです。既定の httpkit.Client も Do にはリトライを掛けません。
-// httpkit.Get に委譲しないのは、あちらが自前でリクエストを組み立て newHTTPRequest の
-// ヘッダーが失われるからです。
+// Retry lives here because the HTTPClient seam is only Do, and the decision to redo the same GET
+// cannot be made from a single response. The default httpkit.Client does not retry Do either.
+// It does not delegate to httpkit.Get, because that builds its own request and the headers from
+// newHTTPRequest would be lost.
 func (r *UniversalReader) fetchBytes(ctx context.Context, uri string) (fetched, error) {
 	if r.retry.maxRetries == 0 {
 		return r.fetchOnce(ctx, uri)
@@ -35,15 +35,15 @@ func (r *UniversalReader) fetchBytes(ctx context.Context, uri string) (fetched, 
 		retry.WithMaxRetries(r.retry.maxRetries),
 		retry.WithInitialInterval(r.retry.initialInterval),
 		retry.WithMaxInterval(r.retry.maxInterval),
-		// Retry-After にも同じ上限を掛ける。Open は同期 API で、叩く先は利用者が入力した
-		// URL なので、上限が無いと相手サーバーに待ち時間を決めさせることになる。
+		// Apply the same bound to Retry-After. Open is a synchronous API and the target is a URL the
+		// user entered, so without a bound the remote server would decide how long we wait.
 		retry.WithMaxRetryAfter(r.retry.maxInterval),
 		retry.WithShouldRetry(r.shouldRetryFetch),
 	)
 }
 
-// fetchOnce は 1 度だけ GET します。使い終えた *http.Request は再送できないため、
-// リクエストは呼ばれるたびに組み直します。
+// fetchOnce GETs once. A used *http.Request cannot be resent, so the request is rebuilt on every
+// call.
 func (r *UniversalReader) fetchOnce(ctx context.Context, uri string) (fetched, error) {
 	req, err := newHTTPRequest(ctx, uri)
 	if err != nil {
@@ -52,12 +52,12 @@ func (r *UniversalReader) fetchOnce(ctx context.Context, uri string) (fetched, e
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return fetched{}, fmt.Errorf("HTTPリクエスト失敗: %w", err)
+		return fetched{}, fmt.Errorf("HTTP request failed: %w", err)
 	}
 
-	// resp 自体と resp.Body の nil チェック・Close・サイズ上限は HandleResponse が行う
-	// （ここで Close すると二重になる）。差し替えたクライアントが (nil, nil) を返す
-	// 場合があるので、ヘッダーを読むのはその後にする。
+	// HandleResponse does the nil checks on resp and resp.Body, the Close and the size cap
+	// (closing here would close twice). A swapped client may return (nil, nil), so the headers
+	// are read only after it.
 	body, err := httpkit.HandleResponse(resp)
 	if err != nil {
 		return fetched{}, err
@@ -66,11 +66,11 @@ func (r *UniversalReader) fetchOnce(ctx context.Context, uri string) (fetched, e
 	return fetched{body: body, contentType: resp.Header.Get("Content-Type")}, nil
 }
 
-// newHTTPRequest は reader 共通の HTTP GET リクエストを生成します。
+// newHTTPRequest builds the HTTP GET request shared by the reader.
 func newHTTPRequest(ctx context.Context, uri string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
-		return nil, fmt.Errorf("HTTPリクエスト作成失敗: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	req.Header.Set("User-Agent", httpkit.UserAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
@@ -87,21 +87,21 @@ func newHTTPRequest(ctx context.Context, uri string) (*http.Request, error) {
 	return req, nil
 }
 
-// shouldRetryFetch は、取得の失敗をやり直す価値があるかを判定します。
+// shouldRetryFetch reports whether a fetch failure is worth retrying.
 func (r *UniversalReader) shouldRetryFetch(err error) bool {
 	if err == nil {
 		return false
 	}
-	// 判断できるクライアントにはその判断を任せる（RetryClassifier 参照）。
+	// Leave the decision to a client that can make it (see RetryClassifier).
 	if classifier, ok := r.httpClient.(RetryClassifier); ok {
 		return classifier.IsHTTPRetryableError(err)
 	}
 
-	// 呼び出し側が打ち切った操作を再開しても待ち時間が伸びるだけ。
+	// Resuming an operation the caller cancelled would only lengthen the wait.
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	// 4xx やリクエスト・レスポンスの形の問題は、繰り返しても結果が変わらない。
+	// 4xx and malformed requests or responses do not change on repetition.
 	if httpkit.IsNonRetryableError(err) ||
 		errors.Is(err, httpkit.ErrResponseBodyTooLarge) ||
 		errors.Is(err, httpkit.ErrNilResponse) ||
@@ -109,6 +109,6 @@ func (r *UniversalReader) shouldRetryFetch(err error) bool {
 		return false
 	}
 
-	// 5xx / 408 / 429 と分類できない通信エラーは一時的な障害とみなす。
+	// Treat 5xx / 408 / 429 and unclassifiable network errors as transient.
 	return true
 }

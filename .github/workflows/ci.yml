@@ -1,4 +1,4 @@
-# CI の実体は shouni/workflows。ジョブ構成とタグ運用の理由はそちらの README にある。
+# The CI itself lives in shouni/workflows; the reasons for the job layout and tagging are in its README.
 name: CI
 
 on:
@@ -18,6 +18,6 @@ jobs:
   ci:
     uses: shouni/workflows/.github/workflows/go-ci.yml@v1
     with:
-      # HTML もヘッダーも、利用者が指定した URL の向こうから来る外部入力。
+      # Both the HTML and the headers are external input from behind a user-supplied URL.
       fuzz-targets: "./extract#FuzzText ./reader#FuzzResolveMediaType"
       fuzz-time: 60s

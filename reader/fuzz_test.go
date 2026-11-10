@@ -5,15 +5,16 @@ import (
 	"testing"
 )
 
-// FuzzResolveMediaType は、Content-Type ヘッダーの解釈が落ちず、戻り値の組み合わせが
-// 契約どおりであることを確かめます。
+// FuzzResolveMediaType checks that interpreting a Content-Type header never crashes and that the
+// combination of return values honours the contract.
 //
-// 値はサーバーが返すものなので、壊れた形はそのまま届きます（パラメータの引用符が
-// 閉じていない、charset が空、区切りだけ、など）。標準の mime.ParseMediaType が
-// 拒んだ場合に自前で前半を切り出す経路があり、そこが表のテストの手薄なところです。
+// The value comes from the server, so broken shapes arrive as they are (a parameter's quote left
+// unclosed, an empty charset, nothing but separators, and so on). When the standard
+// mime.ParseMediaType rejects a value there is a hand-rolled path that cuts out the first half, and
+// that is where the table tests are thin.
 //
-// 契約は 2 つです。エラーなら結果は空。成功したなら、その結果は小文字で、
-// パラメータ（; 以降）も前後の空白も残っていない。
+// The contract has two parts. On error the result is empty. On success the result is lower case,
+// with no parameters (anything after ;) and no surrounding whitespace left.
 func FuzzResolveMediaType(f *testing.F) {
 	seeds := []string{
 		"text/html; charset=utf-8",
@@ -45,7 +46,7 @@ func FuzzResolveMediaType(f *testing.F) {
 			return
 		}
 		if got == "" {
-			return // 空のヘッダーは「不明」として空を返す。
+			return // An empty header means "unknown" and returns empty.
 		}
 		if got != strings.ToLower(got) {
 			t.Fatalf("resolveMediaType(%q) = %q, want it lowercased", contentType, got)

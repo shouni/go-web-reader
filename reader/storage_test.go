@@ -18,12 +18,12 @@ var (
 	_ remoteio.Factory = (*stubFactory)(nil)
 )
 
-// stubReader は Open だけを差し替えたストアです。
+// stubReader is a store with only Open swapped in.
 //
-// remoteio.Store を埋め込んでいるのは、reader が使うのが Open ひとつだけだからです。
-// 他のメソッドを呼べば nil で落ちますが、それは「読む以外の操作はこのパッケージの
-// 責務ではない」ことの表明でもあります。ビルド時の追従漏れは、実際に使う口である
-// remoteio.Reader へのアサーションで検出します。
+// It embeds remoteio.Store because Open is the only method reader uses. Calling any other method
+// crashes on nil, which also states that operations other than reading are not this package's
+// responsibility. Falling behind at build time is caught by the assertion against remoteio.Reader,
+// the seam actually used.
 type stubReader struct {
 	remoteio.Store
 
@@ -50,9 +50,9 @@ func (s *stubCloser) Close() error {
 	return s.err
 }
 
-// remoteio.Factory を満足させるスタブ
+// A stub that satisfies remoteio.Factory.
 type stubFactory struct {
-	reader     remoteio.Store // 具象型ではなくインターフェースで保持する
+	reader     remoteio.Store // held as the interface, not the concrete type
 	readerErr  error
 	closeErr   error
 	closeCalls int
@@ -62,11 +62,11 @@ func (s *stubFactory) Store() (remoteio.Store, error) {
 	if s.readerErr != nil {
 		return nil, s.readerErr
 	}
-	// ここが nil であれば、呼び出し側で store == nil として正しく判定される
+	// If this is nil, the caller correctly detects it as store == nil.
 	return s.reader, nil
 }
 
-// Handler は reader からは使われません。remoteio.Factory を満たすためだけの実装です。
+// Handler is not used by reader. It exists only to satisfy remoteio.Factory.
 func (s *stubFactory) Handler() (remoteio.Handler, error) { return nil, nil }
 
 func (s *stubFactory) Close() error {
@@ -74,13 +74,13 @@ func (s *stubFactory) Close() error {
 	return s.closeErr
 }
 
-// storageCache は、スキームに対応するキャッシュをテストから取り出します。
+// storageCache takes the cache for a scheme out for a test.
 func storageCache(t *testing.T, r *UniversalReader, scheme string) *storageReaderCache {
 	t.Helper()
 
 	cache, ok := r.storages[scheme]
 	if !ok {
-		t.Fatalf("スキーム %q のストレージが登録されていません", scheme)
+		t.Fatalf("no storage registered for scheme %q", scheme)
 	}
 	return cache
 }
@@ -135,9 +135,9 @@ func TestOpenS3UsesInjectedReader(t *testing.T) {
 	}
 }
 
-// TestOpenStorageInitializesSchemesIndependently は、片方のスキームの初期化が
-// 滞っていても、もう片方が独立して開けることを確認します。初期化には認証情報の
-// 解決などの I/O が伴うため、ここを共有ロックにすると一方の遅延が他方を巻き込みます。
+// TestOpenStorageInitializesSchemesIndependently checks that one scheme opens independently even
+// while the other's initialisation is stuck. Initialisation involves I/O such as resolving
+// credentials, so a shared lock here would drag one scheme into the other's delay.
 func TestOpenStorageInitializesSchemesIndependently(t *testing.T) {
 	t.Parallel()
 
@@ -147,7 +147,7 @@ func TestOpenStorageInitializesSchemesIndependently(t *testing.T) {
 	r := newTestReader(t, &stubExtractor{},
 		WithGCSFactory(func(context.Context) (remoteio.Factory, error) {
 			close(gcsStarted)
-			<-release // GCS の初期化を意図的に滞留させる
+			<-release // deliberately stall GCS initialisation
 			return &stubFactory{reader: &stubReader{content: "gcs body"}}, nil
 		}),
 		WithS3Factory(func(context.Context) (remoteio.Factory, error) {
@@ -155,8 +155,8 @@ func TestOpenStorageInitializesSchemesIndependently(t *testing.T) {
 		}),
 	)
 
-	// 失敗時もテストが停止しないよう、滞留を解除してから Close する。
-	// t.Cleanup は LIFO なので、後から登録した解除処理が先に走る。
+	// Release the stall before Close so the test does not hang on failure either.
+	// t.Cleanup is LIFO, so the release registered later runs first.
 	t.Cleanup(func() { _ = r.Close() })
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
@@ -195,7 +195,7 @@ func TestOpenStorageInitializesSchemesIndependently(t *testing.T) {
 			t.Fatalf("body = %q, want %q", got.body, "s3 body")
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("S3 の Open が GCS の初期化完了を待たされている")
+		t.Fatal("S3 Open is waiting for GCS initialisation to finish")
 	}
 }
 
@@ -247,8 +247,8 @@ func TestNewStorageReaderClosesFactoryOnReaderError(t *testing.T) {
 func TestNewStorageReaderClosesFactoryOnNilReader(t *testing.T) {
 	t.Parallel()
 
-	// reader フィールドが初期値 (nil) のままの状態。
-	// これにより Store() が (remoteio.Store)(nil) を返すことをシミュレートする。
+	// The reader field is left at its initial value (nil).
+	// This simulates Store() returning (remoteio.Store)(nil).
 	factory := &stubFactory{}
 
 	_, _, err := newStorageReader(context.Background(), func(context.Context) (remoteio.Factory, error) {
@@ -289,7 +289,7 @@ func TestCloseClosesManagedResources(t *testing.T) {
 	}
 }
 
-// Close は終端であり、解放後の Open は ErrClosed になること。
+// Close must be terminal, and Open after release must return ErrClosed.
 func TestOpenAfterCloseIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -306,7 +306,7 @@ func TestOpenAfterCloseIsRejected(t *testing.T) {
 	}
 }
 
-// Close 後の Open はファクトリを呼び直さないこと（新しい GCS クライアントを作らない）。
+// Open after Close must not call the factory again (no new GCS client is created).
 func TestOpenAfterCloseDoesNotReinitialize(t *testing.T) {
 	t.Parallel()
 
@@ -336,26 +336,26 @@ func TestOpenAfterCloseDoesNotReinitialize(t *testing.T) {
 	}
 
 	if len(factories) != 1 {
-		t.Fatalf("factory count = %d, want 1 (Close 後に作り直してはいけない)", len(factories))
+		t.Fatalf("factory count = %d, want 1 (must not be recreated after Close)", len(factories))
 	}
 	if factories[0].closeCalls != 1 {
 		t.Fatalf("factories[0].closeCalls = %d, want 1", factories[0].closeCalls)
 	}
 
-	// Close は冪等であること（多重解放でエラーにしない）。
+	// Close must be idempotent (closing twice is not an error).
 	if err := r.Close(); err != nil {
-		t.Fatalf("2 度目の Close() error = %v", err)
+		t.Fatalf("second Close() error = %v", err)
 	}
 	if factories[0].closeCalls != 1 {
-		t.Fatalf("2 度目の Close で closeCalls = %d, want 1", factories[0].closeCalls)
+		t.Fatalf("closeCalls after second Close = %d, want 1", factories[0].closeCalls)
 	}
 }
 
-// 既定の URL 安全性検証を使ったまま gs:// / s3:// が開けること。
+// gs:// / s3:// must open with the default URL safety check in place.
 //
-// securenet.ValidateURL（netarmor v1.3.0 以降）は http/https 以外を拒否するため、
-// 全スキームを検証に通すと GCS/S3 が一切開けなくなる。既定の検証器を差し替えずに
-// 確かめる唯一のテストなので、WithSafeURLValidator は渡さない。
+// securenet.ValidateURL (netarmor v1.3.0 and later) rejects anything other than http/https, so
+// running every scheme through the check would make GCS/S3 impossible to open. This is the only test
+// that checks it without swapping the default validator, so it does not pass WithSafeURLValidator.
 func TestOpenStorageWithDefaultURLValidator(t *testing.T) {
 	t.Parallel()
 

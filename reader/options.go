@@ -14,63 +14,64 @@ import (
 	"github.com/shouni/netarmor/securenet"
 )
 
-// リトライの既定値です。httpkit の既定（初期 5 秒・最大 30 秒）より短くしています。
-// Open は呼び出し側を待たせる同期 API なので、待ち時間の合計が体感を直接左右します。
+// Retry defaults. They are shorter than httpkit's defaults (5 s initial, 30 s max).
+// Open is a synchronous API that keeps the caller waiting, so the total wait directly shapes how it feels.
 const (
-	// DefaultMaxRetries は HTTP 取得を再試行する既定の回数です（初回の実行を含みません）。
+	// DefaultMaxRetries is the default number of times an HTTP fetch is retried (not counting the first attempt).
 	DefaultMaxRetries = 2
-	// DefaultRetryInitialInterval は再試行までの初期待機時間です。
+	// DefaultRetryInitialInterval is the initial wait before a retry.
 	DefaultRetryInitialInterval = 500 * time.Millisecond
-	// DefaultRetryMaxInterval は再試行までの待機時間の上限です。
+	// DefaultRetryMaxInterval is the upper bound of the wait before a retry.
 	DefaultRetryMaxInterval = 4 * time.Second
 )
 
-// Extractor は取得済みの HTML から本文テキストを抽出します。
-// 第2戻り値は本文が見つかったかどうかです。
+// Extractor extracts the main text from already-fetched HTML.
+// The second return value reports whether a body was found.
 type Extractor interface {
 	Extract(ctx context.Context, r io.Reader) (text string, hasBody bool, err error)
 }
 
-// ContentTypeExtractor は、Content-Type ヘッダーも受け取れる抽出器です。
+// ContentTypeExtractor is an extractor that also accepts the Content-Type header.
 //
-// 別の口ではなく、WithExtractor に渡した抽出器が追加で持てる能力です。
-// 満たしていれば Extract の代わりにこちらが呼ばれます。
+// It is not a separate seam but an extra capability the extractor passed to WithExtractor may have.
+// When it is satisfied, this is called instead of Extract.
 //
-// 文字コードの変換は <meta charset> を読める抽出器側の 1 箇所でしか行えないため
-// （UTF-8 に直したバイト列を再度 Shift_JIS と解釈すれば壊れます）、
-// reader は Content-Type を判定材料として渡すだけで変換はしません。
+// Charset conversion can happen in only one place, the extractor that can read <meta charset>
+// (bytes already converted to UTF-8 would break if interpreted as Shift_JIS again), so
+// reader only passes the Content-Type along as a hint and does not convert.
 type ContentTypeExtractor interface {
 	ExtractWithContentType(ctx context.Context, r io.Reader, contentType string) (text string, hasBody bool, err error)
 }
 
-// HTTPClient は HTTP リクエストを実行する最小インターフェースです。
+// HTTPClient is the minimal interface for executing an HTTP request.
 type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// RetryClassifier は、取得の失敗を再試行すべきか判断できる HTTP クライアントです。
-// HTTPClient が満たしていればその判断を優先します。エラーの型を知っているのは
-// それを返したクライアントなので、リトライ対象の定義を reader 側で二重管理しません。
+// RetryClassifier is an HTTP client that can decide whether a fetch failure should be retried.
+// When the HTTPClient satisfies it, its decision takes precedence. The client that returned an error is
+// the one that knows its type, so reader does not keep a second definition of what is retryable.
 type RetryClassifier interface {
 	IsHTTPRetryableError(err error) bool
 }
 
-// SafeURLValidator は URI の安全性を検証します。安全な場合は nil を返します。
-// 名前解決を伴うため context を受け取ります。
+// SafeURLValidator checks that a URI is safe, returning nil when it is.
+// It takes a context because it resolves names.
 type SafeURLValidator func(context.Context, string) error
 
-// StorageFactory は GCS/S3 のクライアント一式を生成します。
-// 実際の接続確立を伴うため、対象スキームの初回 Open 時にだけ呼ばれます。
+// StorageFactory creates the set of GCS/S3 clients.
+// It establishes real connections, so it is called only on the first Open for its scheme.
 type StorageFactory func(context.Context) (remoteio.Factory, error)
 
-// Option は UniversalReader の依存を差し替えるためのオプションです。
+// Option swaps a dependency of UniversalReader.
 //
-// nil の Option、および nil の値を渡した With* は無視され、既定値が保たれます。
-// 差し替えたつもりで既定のまま動くので、渡す値が nil でないことは呼び出し側で確かめてください。
+// A nil Option, and a With* given a nil value, are ignored and the default is kept.
+// The reader then runs with the default while you believe it was swapped, so callers should make sure
+// the value they pass is not nil.
 type Option func(*options)
 
-// retryPolicy は HTTP 取得の再試行設定です。
-// maxRetries が 0 のときは 1 度だけ実行し、再試行しません。
+// retryPolicy is the retry configuration for HTTP fetches.
+// When maxRetries is 0 the fetch runs once and is not retried.
 type retryPolicy struct {
 	maxRetries      uint
 	initialInterval time.Duration
@@ -86,11 +87,11 @@ type options struct {
 	retry         retryPolicy
 }
 
-// newOptions は既定値にオプションを適用した設定を返します。
-// 各 With* が nil を無視するため、フィールドが nil になる経路はなく、New は再検査しません。
+// newOptions returns the defaults with the options applied.
+// Every With* ignores nil, so no field can end up nil, and New does not check again.
 func newOptions(opts ...Option) options {
 	cfg := options{
-		// securenet.ValidateURL は可変長オプションを取るため、そのままでは代入できない。
+		// securenet.ValidateURL takes variadic options, so it cannot be assigned directly.
 		safeURL: func(ctx context.Context, uri string) error {
 			return securenet.ValidateURL(ctx, uri)
 		},
@@ -112,29 +113,30 @@ func newOptions(opts ...Option) options {
 	return cfg
 }
 
-// WithMaxRetries は HTTP 取得を再試行する回数を設定します（初回の実行は含みません）。
-// 0 を渡すと再試行しません。
+// WithMaxRetries sets how many times an HTTP fetch is retried (not counting the first attempt).
+// Passing 0 disables retries.
 //
-// 再試行するのは 5xx / 408 / 429 と、分類できない通信エラー（タイムアウトなど）だけです。
-// 4xx やレスポンスサイズ超過は、同じリクエストを繰り返しても結果が変わらないため再試行しません。
+// Only 5xx / 408 / 429 and network errors that cannot be classified (timeouts and the like) are
+// retried. Other 4xx responses and an oversized response are not, because repeating the same request
+// would not change the result.
 //
-// レスポンスに Retry-After があった場合、次の待機時間は指数バックオフの算出値ではなく
-// その指示値になります。サーバーが待てと言った時間より早く送り直しても、同じ拒否が
-// 返るだけだからです。ただし指示値が WithRetryInterval の上限を超える場合は、待たずに
-// 打ち切って retry.ErrRetryAfterTooLong を返します。叩く先は利用者が入力した URL で、
-// 上限が無いと相手に待ち時間を決めさせることになります。
+// When the response has Retry-After, the next wait is the instructed value rather than the one
+// computed by exponential backoff, because resending before the time the server asked for would only
+// get the same refusal. If the instructed value exceeds WithRetryInterval's upper bound, however, it
+// gives up without waiting and returns retry.ErrRetryAfterTooLong. The target is a URL the user
+// entered, and without a bound the other side would decide how long we wait.
 //
-// 既定のクライアントを WithHTTPClient で自前のリトライ付きクライアントに
-// 差し替える場合は、二重に待たないよう 0 を渡してください。
+// When swapping the default client for your own retrying client with WithHTTPClient, pass 0 so the
+// waits are not doubled.
 func WithMaxRetries(n uint) Option {
 	return func(o *options) {
 		o.retry.maxRetries = n
 	}
 }
 
-// WithRetryInterval は再試行までの待機時間（指数バックオフの初期値と上限）を設定します。
-// 0 以下の値は無視され、既定値が保たれます。上限は Retry-After の指示にも掛かります
-// （WithMaxRetries を参照）。
+// WithRetryInterval sets the wait before a retry (the initial value and upper bound of the exponential
+// backoff). Values of 0 or less are ignored and the defaults are kept. The upper bound also applies to
+// Retry-After instructions (see WithMaxRetries).
 func WithRetryInterval(initialInterval, maxInterval time.Duration) Option {
 	return func(o *options) {
 		if initialInterval > 0 {
@@ -146,11 +148,11 @@ func WithRetryInterval(initialInterval, maxInterval time.Duration) Option {
 	}
 }
 
-// WithExtractor はテキスト抽出器を差し替えます。
-// HTTP の取得そのものは差し替わりません（そちらは WithHTTPClient）。
+// WithExtractor swaps the text extractor.
+// HTTP fetching itself is not swapped (that is WithHTTPClient).
 //
-// 抽出器が ContentTypeExtractor も満たす場合は、Content-Type ヘッダーを添えて
-// 呼ばれます（既定の extract.Engine は満たします）。
+// When the extractor also satisfies ContentTypeExtractor, it is called with the Content-Type header
+// (the default extract.Engine does).
 func WithExtractor(extractor Extractor) Option {
 	return func(o *options) {
 		if extractor != nil {
@@ -159,13 +161,13 @@ func WithExtractor(extractor Extractor) Option {
 	}
 }
 
-// WithHTTPClient は HTTP(S) の取得に使うクライアントを差し替えます。
+// WithHTTPClient swaps the client used for HTTP(S) fetches.
 //
-// リクエストヘッダーを変えたい場合もここです。Do の中で *http.Request を
-// 書き換えてから元のクライアントに委譲してください。
+// This is also the place to change request headers: rewrite the *http.Request inside Do, then
+// delegate to the original client.
 //
-// レスポンスサイズの上限は外れません。上限はクライアントの外側（返ってきた
-// *http.Response を読み切る go-http-kit の処理）で掛かるためです。
+// The response size cap is not removed, because it is applied outside the client (by go-http-kit's
+// handling that reads the returned *http.Response to the end).
 func WithHTTPClient(client HTTPClient) Option {
 	return func(o *options) {
 		if client != nil {
@@ -174,13 +176,13 @@ func WithHTTPClient(client HTTPClient) Option {
 	}
 }
 
-// WithSafeURLValidator は URL 安全性検証関数を差し替えます。
+// WithSafeURLValidator swaps the URL safety check.
 //
-// 検証器が呼ばれるのは HTTP(S) の枝だけです。gs:// / s3:// は接続先をクラウド SDK が
-// 決めるため検証を通らず、ストレージ側の URI を弾く口ではありません。
+// The validator is called only on the HTTP(S) branch. gs:// / s3:// do not go through it, because
+// the cloud SDK decides where to connect, so it is not a seam for rejecting storage URIs.
 //
-// ローカルのテストサーバーへ向けるなら WithHTTPClient も差し替えてください。
-// 検証器だけ緩めても、既定のクライアントが接続直前に行う IP 検証で落ちます。
+// To point at a local test server, swap WithHTTPClient as well. Loosening only the validator still
+// fails at the IP check the default client performs right before connecting.
 func WithSafeURLValidator(fn SafeURLValidator) Option {
 	return func(o *options) {
 		if fn != nil {
@@ -189,7 +191,7 @@ func WithSafeURLValidator(fn SafeURLValidator) Option {
 	}
 }
 
-// WithGCSFactory は GCS ファクトリ生成処理を差し替えます。
+// WithGCSFactory swaps how the GCS factory is created.
 func WithGCSFactory(fn StorageFactory) Option {
 	return func(o *options) {
 		if fn != nil {
@@ -198,7 +200,7 @@ func WithGCSFactory(fn StorageFactory) Option {
 	}
 }
 
-// WithS3Factory は S3 ファクトリ生成処理を差し替えます。
+// WithS3Factory swaps how the S3 factory is created.
 func WithS3Factory(fn StorageFactory) Option {
 	return func(o *options) {
 		if fn != nil {

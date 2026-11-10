@@ -7,11 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Go Web Reader is a Go **library** (no CLI, no `main`) that reads content from a URI regardless of backend — `https://`, `http://`, `gs://`, and `s3://` all go through one `Open(ctx, uri)`. Two public packages:
 
 - `reader` — scheme dispatch, Content-Type handling, fetch retry, GCS/S3 lazy init, DI options.
-  `reader.go` が公開 API とスキーム振り分け、`options.go` がインターフェースと `With*`、`fetch.go` が HTTP の取得とリトライ、`http.go` が Content-Type の振り分け、`storage.go` が GCS/S3 の遅延初期化です。
+  `reader.go` holds the public API and scheme dispatch, `options.go` the interfaces and `With*`, `fetch.go` HTTP fetching and retry, `http.go` Content-Type dispatch, and `storage.go` the lazy GCS/S3 init.
 - `extract` — HTML main-content extraction (charset detection included). Usable on its own.
-  `extract.go` が公開 API と抽出の流れ、`selectors.go` がセレクタとタグ集合、`text.go` がブロック要素のテキスト組み立て、`table.go` が表の平坦化です。
+  `extract.go` holds the public API and the extraction flow, `selectors.go` the selectors and tag sets, `text.go` text assembly for block elements, and `table.go` table flattening.
 
-テストは実装ファイルと 1:1 の `_test.go` に置きます。Dependency direction is one-way: `reader` → `extract`. Nothing imports `reader`.
+Tests sit in a `_test.go` matching each implementation file 1:1. Dependency direction is one-way: `reader` → `extract`. Nothing imports `reader`.
 
 ## Commands
 
@@ -39,9 +39,9 @@ There is no shared `ports`/`types` package. `reader` declares the `HTTPClient` a
 
 ### Charset decoding lives in extract, and only there
 
-`extract` は入力を UTF-8 に直してから解析します（`golang.org/x/net/html/charset`）。**変換を挟む箇所は 1 つだけです** — UTF-8 に直したバイト列を再度 `<meta charset>` の宣言で解釈し直せば壊れるため、`reader` 側では変換できません。`reader` の `Content-Type` は `ContentTypeExtractor` を通して判定材料として渡すだけです。
+`extract` converts its input to UTF-8 before parsing (`golang.org/x/net/html/charset`). **There is exactly one place where the conversion happens** — bytes already converted to UTF-8 would break if reinterpreted by their `<meta charset>` declaration, so `reader` cannot convert. `reader` only passes the `Content-Type` along through `ContentTypeExtractor` as a hint.
 
-代償として `extract` は `x/text` のエンコーディング表を引き込みます。`extract` の依存を「goquery・cascadia・`x/net/html`・標準ライブラリだけ」に保つ方針の唯一の例外で、日本語のページを読むライブラリとして払う価値があると判断しています。
+The price is that `extract` pulls in `x/text`'s encoding tables. It is the one exception to keeping `extract`'s dependencies to "goquery, cascadia, `x/net/html` and the standard library", judged worth paying for a library that reads Japanese pages.
 
 ### extract does no I/O
 
@@ -53,13 +53,13 @@ There is no shared `ports`/`types` package. `reader` declares the `HTTPClient` a
 
 ### The URL safety check runs after scheme dispatch, and only for HTTP(S)
 
-理由は `Open` のコメントにあります。ここで言うべきは順序の保証がテストに依存していることです: `reader_test.go` / `storage_test.go` の `newTestReader` は検証器を no-op に差し替えるため、**`TestOpenStorageWithDefaultURLValidator` だけが既定の検証器のまま `gs://` / `s3://` を開ける**ことを確かめています。消さないでください。
+The reason is in the comment on `Open`. What needs saying here is that the ordering guarantee depends on a test: `newTestReader` in `reader_test.go` / `storage_test.go` swaps the validator for a no-op, so **only `TestOpenStorageWithDefaultURLValidator` checks that `gs://` / `s3://` open with the default validator in place**. Do not delete it.
 
 ### Retry belongs to reader, not to the HTTP seam
 
 `ReadAll` has no size limit of its own: HTTP stops at `HandleResponse`'s 25MB, but `gs://` / `s3://` hand the stream straight through. `ReadAllLimit` (fail with `ErrTooLarge`) and `ReadText` (truncate at a UTF-8 boundary, report it) exist because two services were hand-rolling the same read-one-byte-more-than-the-limit dance around `Open`. Neither logs; a truncation is the caller's to record.
 
-`HTTPClient` の口は `Do` だけなので、リトライは `fetchBytes` が `go-http-kit/retry` で掛けます。既定の `httpkit.Client` も `Do` にはリトライを掛けないため、ここを持たないと既定構成でも一度も再試行されません。再試行の可否はクライアントが `RetryClassifier` を満たすならそちらに委ね、満たさないクライアント向けのフォールバックが `shouldRetryFetch` の後半です。待ち時間の既定値は httpkit（初期 5 秒・最大 30 秒）より短くしています — `Open` は同期 API だからです。同じ理由で `Retry-After` の指示にも `maxInterval` を上限として掛けています（`retry.WithMaxRetryAfter`）。backoff は指示値をそのまま待ち、`MaxInterval` では抑えられないので、これが無いと利用者が入力した URL の相手が `Retry-After: 3600` を返しただけで `Open` が ctx の期限まで戻りません。上限を超えたら待たずに `retry.ErrRetryAfterTooLong` で打ち切ります。
+The `HTTPClient` seam is only `Do`, so retry is applied by `fetchBytes` with `go-http-kit/retry`. The default `httpkit.Client` does not retry `Do` either, so without this not even the default configuration would ever retry. Whether to retry is delegated to the client when it satisfies `RetryClassifier`; the second half of `shouldRetryFetch` is the fallback for clients that do not. The default wait times are shorter than httpkit's (5 s initial, 30 s max) — because `Open` is a synchronous API. For the same reason a `Retry-After` instruction is also capped at `maxInterval` (`retry.WithMaxRetryAfter`). Backoff waits for the instructed value as is, and `MaxInterval` does not bound it, so without this a user-supplied URL whose server merely returns `Retry-After: 3600` would keep `Open` from returning until the ctx deadline. Beyond the cap it gives up without waiting, with `retry.ErrRetryAfterTooLong`.
 
 ### Two selector lists, removed at different times
 
@@ -71,11 +71,11 @@ There is no shared `ports`/`types` package. `reader` declares the `HTTPClient` a
 
 **`div` is not in `blockTags`, and the fallback for `<div>`-written bodies is deliberately narrow.** Adding `div` to the block list would make every wrapper a paragraph and double-emit everything under it. Instead, `collectContainerParagraphs` runs only when the block scan produced no body at all: it takes leaf containers (`div`/`section`/`article` with no block or container descendants), splits their text at `<br>`, and applies `MinParagraphLength` like `<p>`. A page with even one real block keeps only the blocks — a mixed page's wrapper asides are not body. `document_with_div_and_br_body` / `document_with_p_ignores_div_text` pin both halves.
 
-表だけは逆向きです: 表の内側のブロック要素は走査で飛ばし（`insideTable`）、`processTable` がセルの文字列として平坦化します。`<td><p>…</p></td>` の `<p>` を個別に出すと行の文脈が失われ、短ければしきい値で消えるためです。
+Tables are the reverse: block elements inside a table are skipped by the scan (`insideTable`), and `processTable` flattens them into cell text. Emitting the `<p>` in `<td><p>…</p></td>` on its own would lose the row's context, and a short one would vanish under the threshold.
 
 ### Selectors are compiled once, and tag checks skip CSS entirely
 
-goquery's string-taking `Find`/`Is` call `cascadia.Compile` on **every** call. Every selector here is a package-level `cascadia.MustCompile`, and single-tag tests read `html.Node.Data` directly instead. Keep new per-node checks off the string API. 文字コード判定と `noiseSelectors` / `blockTags` の拡張で `BenchmarkText/sections=100` は約 10% 遅くなりました。**速度を理由に戻さないでください** — 落ちるのは出力の正しさの側です。
+goquery's string-taking `Find`/`Is` call `cascadia.Compile` on **every** call. Every selector here is a package-level `cascadia.MustCompile`, and single-tag tests read `html.Node.Data` directly instead. Keep new per-node checks off the string API. Charset detection and the extensions to `noiseSelectors` / `blockTags` made `BenchmarkText/sections=100` about 10% slower. **Do not revert them for speed** — what would suffer is the correctness of the output.
 
 ### Length thresholds are counted in runes
 
@@ -83,13 +83,14 @@ goquery's string-taking `Find`/`Is` call `cascadia.Compile` on **every** call. E
 
 ## Conventions
 
+- **Language**: comments, doc comments, error/log/panic messages and test assertion messages are English (moved 2026-11-10; do not mix Japanese back in). Error strings follow Go style: lowercase, no trailing punctuation (ST1005). Japanese stays only where it is data — HTML/text fixtures, runtime-compared strings, encoding test data. Subtest names (`t.Run` names and table `name` fields) are still Japanese for now. `README.md` is English and `README.ja.md` is its Japanese version; update the two together.
 - **Cleanup**: `Close` runs *every* closer and merges failures with `errors.Join`. Don't `defer resource.Close()` and ignore the result.
-- **Close is terminal for every scheme**, including HTTP — `UniversalReader.closed` が印です。
-- **Content-Type support** is the `mediaKinds` table in `reader/http.go`. Adding a type means editing that table and the README's 対応 Content-Type list (the only user-facing copy — `mediaKinds` is unexported). `resolveMediaType`'s rescue path — for headers `mime.ParseMediaType` rejects but real servers still send, like an unclosed quote around `charset` — only accepts a well-formed `type/subtype` token (`isMediaTypeToken`). Without that check `classifyMediaType`'s deliberately open `image/` prefix match let `"image/ 0"` through as an image, and handed back a string that is not a usable media type. A fuzz target found it.
+- **Close is terminal for every scheme**, including HTTP — `UniversalReader.closed` is the marker.
+- **Content-Type support** is the `mediaKinds` table in `reader/http.go`. Adding a type means editing that table and the README's Supported Content-Types list (in both `README.md` and `README.ja.md`; the only user-facing copy — `mediaKinds` is unexported). `resolveMediaType`'s rescue path — for headers `mime.ParseMediaType` rejects but real servers still send, like an unclosed quote around `charset` — only accepts a well-formed `type/subtype` token (`isMediaTypeToken`). Without that check `classifyMediaType`'s deliberately open `image/` prefix match let `"image/ 0"` through as an image, and handed back a string that is not a usable media type. A fuzz target found it.
 - **Both external-input surfaces are fuzzed** (`extract#FuzzText`, `reader#FuzzResolveMediaType`, 60s each in CI): arbitrary bytes from a user-supplied URL meet a DOM walk in one and hand-rolled header parsing in the other. `FuzzText` pins the return-value contract (an error means empty text and `hasBody` false; `hasBody` true means non-blank text) **and determinism** — the extractor walks maps in places, and an order leak there would change a notification's contents between runs.
-- **Scheme parsing** uses `remoteio.Scheme` for every scheme. gs/s3 では URI をそのまま `remoteio.Reader.Open` に渡すので必須で、HTTP(S) は振り分けを 1 系統にするために揃えています。スキーム名は `securenet.SchemeHTTP` / `SchemeHTTPS` から取り、キーは区切りを含まない名前 (`"gs"`) です。Adding a scheme means one more entry in the `storages` map in `reader.New`.
-- **大文字スキームは未対応** (`HTTPS://`)。対応するなら HTTP とストレージの両方を揃えて直してください。
-- **Dispatch is not a security predicate**: 振り分けに `securenet` の判定を使わないでください（理由は `Open` のコメント）。名前解決を伴うため振り分けが I/O になる、という点も加わります。
+- **Scheme parsing** uses `remoteio.Scheme` for every scheme. For gs/s3 it is required, because the URI is handed to `remoteio.Reader.Open` as is; HTTP(S) follows it so that dispatch has a single path. Scheme names come from `securenet.SchemeHTTP` / `SchemeHTTPS`, and the keys are names without the separator (`"gs"`). Adding a scheme means one more entry in the `storages` map in `reader.New`.
+- **Upper-case schemes are not supported** (`HTTPS://`). If you add support, fix HTTP and storage together.
+- **Dispatch is not a security predicate**: do not use `securenet`'s checks for dispatch (the reason is in the comment on `Open`). On top of that, they resolve names, which would turn dispatch into I/O.
 - **README.md follows `public-docs/docs/library-readme-convention.md`**: scope and traps only, one "first call" code example, signatures and defaults in godoc, reasoning here. No option/retry tables, no changelog.
 
 ## Key dependencies

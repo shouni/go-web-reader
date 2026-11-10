@@ -9,13 +9,13 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// storageReaderCache は 1 スキーム分のストレージリーダーを遅延初期化して保持します。
+// storageReaderCache lazily initialises and holds the storage reader for one scheme.
 //
-// ロックをスキームごとに持つのは、初期化に認証情報の解決などの I/O が伴うためです。
-// 共有ロックだと GCS の初期化が詰まっている間、S3 の Open や Close まで待たされます。
+// The lock is per scheme because initialisation involves I/O such as resolving credentials. With a
+// shared lock, an S3 Open or even Close would wait while GCS initialisation is stuck.
 //
-// remoteio.Lazy では置き換えられません。ここで管理しているのは Factory の寿命
-// （Close と解放後の利用拒否）で、Lazy は Handler を包むだけで寿命を持ちません。
+// remoteio.Lazy cannot replace it. What is managed here is the Factory's lifetime (Close, and refusing
+// use after release); Lazy only wraps a Handler and has no lifetime.
 type storageReaderCache struct {
 	label      string
 	newFactory StorageFactory
@@ -26,7 +26,7 @@ type storageReaderCache struct {
 	closed bool
 }
 
-// openStorage はスキームに対応するストレージリーダーを取得し、URI の読み取りストリームを返します。
+// openStorage gets the storage reader for the scheme and returns a read stream for the URI.
 func (r *UniversalReader) openStorage(ctx context.Context, uri string, cache *storageReaderCache) (io.ReadCloser, error) {
 	reader, err := cache.get(ctx)
 	if err != nil {
@@ -36,13 +36,13 @@ func (r *UniversalReader) openStorage(ctx context.Context, uri string, cache *st
 	return reader.Open(ctx, uri)
 }
 
-// get はストレージリーダーを遅延初期化し、以後の呼び出しでは同じものを再利用します。
+// get lazily initialises the storage reader and reuses it on later calls.
 func (c *storageReaderCache) get(ctx context.Context) (remoteio.Reader, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.closed {
-		return nil, fmt.Errorf("%sリーダーは利用できません: %w", c.label, ErrClosed)
+		return nil, fmt.Errorf("%s reader is not available: %w", c.label, ErrClosed)
 	}
 	if c.reader != nil {
 		return c.reader, nil
@@ -50,7 +50,7 @@ func (c *storageReaderCache) get(ctx context.Context) (remoteio.Reader, error) {
 
 	reader, closer, err := newStorageReader(ctx, c.newFactory)
 	if err != nil {
-		return nil, fmt.Errorf("%sリーダーの生成に失敗: %w", c.label, err)
+		return nil, fmt.Errorf("failed to create %s reader: %w", c.label, err)
 	}
 	c.reader = reader
 	c.closer = closer
@@ -58,30 +58,30 @@ func (c *storageReaderCache) get(ctx context.Context) (remoteio.Reader, error) {
 	return c.reader, nil
 }
 
-// newStorageReader はストレージファクトリから入力リーダーとクローザーを生成します。
+// newStorageReader creates the input reader and closer from a storage factory.
 func newStorageReader(ctx context.Context, newFactory StorageFactory) (remoteio.Reader, io.Closer, error) {
 	factory, err := newFactory(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ストレージファクトリの生成に失敗: %w", err)
+		return nil, nil, fmt.Errorf("failed to create storage factory: %w", err)
 	}
 
-	// 要るのは Open だけなので、保持する型は remoteio.Reader に絞る（読む以上のことをしないと型で示す）。
+	// Only Open is needed, so the held type is narrowed to remoteio.Reader (the type says it does nothing beyond reading).
 	store, err := factory.Store()
 	if err == nil && store == nil {
 		err = fmt.Errorf("store is nil")
 	}
 	if err != nil {
-		// ファクトリはここでしか参照されないので、失敗したら閉じてから返す。
+		// The factory is referenced only here, so close it before returning on failure.
 		_ = factory.Close()
-		return nil, nil, fmt.Errorf("リーダーの生成に失敗: %w", err)
+		return nil, nil, fmt.Errorf("failed to create reader: %w", err)
 	}
 
 	return store, factory, nil
 }
 
-// close は保持しているクローザーを閉じ、以後の利用を拒否します。
-// io.Closer の慣習どおり終端です。解放後の Open が黙って初期化し直すと、
-// 組み込んだ側からは「閉じたはずのものが接続を張り直す」ように見えます。
+// close closes the held closer and refuses further use.
+// It is terminal, as is customary for io.Closer. If an Open after release silently re-initialised,
+// the embedding code would see something it closed open a connection again.
 func (c *storageReaderCache) close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -7,8 +7,8 @@ import (
 	"golang.org/x/net/html"
 )
 
-// insideTable は n が table 要素の内側にあるかを返します。
-// 表の中のブロック要素は processTable が行の一部として出すので、ブロック走査は飛ばします。
+// insideTable reports whether n is inside a table element.
+// processTable emits the block elements inside a table as part of a row, so the block scan skips them.
 func insideTable(n *html.Node) bool {
 	for p := n.Parent; p != nil; p = p.Parent {
 		if p.Type == html.ElementNode && p.Data == "table" {
@@ -18,8 +18,9 @@ func insideTable(n *html.Node) bool {
 	return false
 }
 
-// processTable は表の内容を「セル | セル」の行に整形します。
-// 行とセルは表の直下からだけ取ります。セレクタで tr / td を探すと入れ子の表の分まで外側の行に混ざります。
+// processTable formats a table's contents as "cell | cell" rows.
+// Rows and cells are taken only from directly under the table. Finding tr / td with a selector would mix a
+// nested table's rows into the outer rows.
 func processTable(s *goquery.Selection) string {
 	table := s.Get(0)
 	if table == nil {
@@ -45,7 +46,7 @@ func processTable(s *goquery.Selection) string {
 			}
 			rowTexts = append(rowTexts, cellText)
 		}
-		// セルが無い行や全セルが空の行は空行にしかならない。
+		// A row with no cells, or with every cell empty, would only become a blank line.
 		if !hasValue {
 			return
 		}
@@ -57,8 +58,8 @@ func processTable(s *goquery.Selection) string {
 	return ""
 }
 
-// forEachRow は table 直下の tr を文書順に fn へ渡します。
-// thead / tbody / tfoot を挟んだ tr も含めますが、入れ子の表の tr は含めません。
+// forEachRow passes the tr elements directly under table to fn in document order.
+// It includes tr elements under thead / tbody / tfoot, but not those of a nested table.
 func forEachRow(table *html.Node, fn func(row *html.Node)) {
 	for child := table.FirstChild; child != nil; child = child.NextSibling {
 		if child.Type != html.ElementNode {
@@ -77,7 +78,7 @@ func forEachRow(table *html.Node, fn func(row *html.Node)) {
 	}
 }
 
-// childElement は n の直下にある最初の tag 要素を返します。無ければ nil です。
+// childElement returns the first tag element directly under n, or nil if there is none.
 func childElement(n *html.Node, tag string) *html.Node {
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		if child.Type == html.ElementNode && child.Data == tag {
@@ -87,9 +88,9 @@ func childElement(n *html.Node, tag string) *html.Node {
 	return nil
 }
 
-// allText は n の子孫のテキストをすべて連結します（表のセル用）。ownText と違って
-// ブロック要素にも立ち入りますが、その境界と <br> には空白を挟みます。挟まないと
-// <li>A</li><li>B</li> が "AB" に融合します。
+// allText concatenates all text under n (for table cells). Unlike ownText it descends into block
+// elements, but puts a space at their boundaries and at <br>. Without it, <li>A</li><li>B</li> would
+// fuse into "AB".
 func allText(n *html.Node) string {
 	var builder strings.Builder
 	writeAllText(&builder, n)

@@ -10,41 +10,47 @@ import (
 )
 
 const (
-	// MinParagraphLength は、本文として採用する段落の最小文字数（バイト数ではない）です。
+	// MinParagraphLength is the minimum length, in characters (not bytes), of a paragraph kept as body text.
 	MinParagraphLength = 20
-	// MinHeadingLength は、見出しとして採用する最小文字数です。「概要」のような 2 文字の見出しを残します。
+	// MinHeadingLength is the minimum length, in characters, of a heading that is kept. It keeps
+	// two-character headings such as 「概要」.
 	MinHeadingLength = 2
 
-	// mainContentSelectors は本文が入っていそうな要素です。最初に一致したものを本文候補にします。
+	// mainContentSelectors are the elements likely to hold the main content. The first match becomes the
+	// main-content candidate.
 	mainContentSelectors = "article, main, div[role='main'], #main, #content, .post-content, .article-body, .entry-content, .markdown-body, .readme"
 
-	// noiseSelectors は本文の内側にあっても本文ではない要素で、本文候補を決める前に
-	// ページ全体から取り除きます。noscript / template はパーサからは中身がただのテキストに
-	// 見えるため、落とさないと段落に混ざります。hidden / aria-hidden は文書自身が非表示を宣言した要素です。
+	// noiseSelectors are elements that are not body text even inside the main content; they are removed
+	// from the whole page before the main-content candidate is chosen. The parser sees the contents of
+	// noscript / template as plain text, so unless they are dropped they mix into paragraphs.
+	// hidden / aria-hidden are elements the document itself declares hidden.
 	noiseSelectors = "script, style, form, nav, aside, noscript, template, [hidden], [aria-hidden='true'], .related-posts, .social-share, .comments, .ad-banner, .advertisement"
 
-	// pageFrameSelectors は、本文候補が無くページ全体を本文とするときにだけ取り除く囲み要素です。
-	// 記事の内側の <header> は見出しを、<footer> は署名を持つことがあるため、常には落としません。
+	// pageFrameSelectors are framing elements removed only when there is no main-content candidate and the
+	// whole page is taken as the body. Inside an article a <header> may hold the heading and a <footer> the
+	// byline, so they are not always dropped.
 	pageFrameSelectors = "header, footer, .sidebar"
 
 	titlePrefix        = "【記事タイトル】 "
 	tableCaptionPrefix = "【表題】 "
 )
 
-// blockTags は走査対象のブロック要素です。blockMatcher と blockTagSet を
-// ここから導出するので、一覧はこの 1 箇所だけです。
+// blockTags are the block elements that are scanned. blockMatcher and blockTagSet are derived from it,
+// so this is the only list.
 var blockTags = []string{"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "dt", "dd", "figcaption", "blockquote", "table", "pre"}
 
 var headingTags = []string{"h1", "h2", "h3", "h4", "h5", "h6"}
 
-// tableTags は表の構造要素です。セルの平坦化でブロック要素と同じく境界に空白を挟みます。
+// tableTags are a table's structural elements. Flattening a cell puts a space at their boundaries, as
+// it does for block elements.
 var tableTags = []string{"caption", "thead", "tbody", "tfoot", "tr", "th", "td"}
 
-// shortTags は段落の最小文字数を課さないブロック要素です。短くても項目として意味を持ちます。
+// shortTags are block elements exempt from the minimum paragraph length. They carry meaning as items even
+// when short.
 var shortTags = []string{"li", "dt", "dd", "figcaption"}
 
-// セレクタは 1 度だけコンパイルします。goquery の文字列を取る Find/Is は
-// 呼ぶたびに cascadia.Compile を呼び直し、キャッシュしません。
+// Selectors are compiled once. goquery's string-taking Find/Is call cascadia.Compile again on every
+// call and do not cache.
 var (
 	blockMatcher       = cascadia.MustCompile(strings.Join(blockTags, ", "))
 	mainContentMatcher = cascadia.MustCompile(mainContentSelectors)
@@ -53,15 +59,15 @@ var (
 	titleMatcher       = cascadia.MustCompile("title")
 	bodyMatcher        = cascadia.MustCompile("body")
 
-	// containerMatcher は、段落要素を使わずに本文を直書きするページのための走査対象です。
-	// ブロック要素が 1 つも本文を出さなかったときにだけ使います（extract.go の
-	// collectContainerParagraphs）。
+	// containerMatcher is what is scanned for pages that write the body directly, without paragraph
+	// elements. It is used only when no block element produced any body text
+	// (collectContainerParagraphs in extract.go).
 	containerMatcher = cascadia.MustCompile("div, section, article")
 
 	blockTagSet   = newTagSet(blockTags)
 	headingTagSet = newTagSet(headingTags)
 	shortTagSet   = newTagSet(shortTags)
-	// flattenBoundarySet は表のセルを平坦化するときに空白で区切る要素です。
+	// flattenBoundarySet are the elements separated by a space when a table cell is flattened.
 	flattenBoundarySet = newTagSet(slices.Concat(blockTags, tableTags))
 )
 
@@ -73,8 +79,8 @@ func newTagSet(tags []string) map[string]struct{} {
 	return set
 }
 
-// tagName は要素ノードのタグ名を返します。要素でなければ空文字列です。
-// 単一タグの判定に CSS の照合機構は要りません。
+// tagName returns the tag name of an element node, or an empty string for a non-element.
+// A single-tag check needs no CSS matching machinery.
 func tagName(s *goquery.Selection) string {
 	node := s.Get(0)
 	if node == nil || node.Type != html.ElementNode {

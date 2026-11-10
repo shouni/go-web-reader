@@ -1,44 +1,44 @@
-// Package extract は、HTMLコンテンツから本文テキストを高精度に抽出します。
+// Package extract extracts the main text from HTML content with high precision.
 //
-// 取得（HTTP アクセス）はこのパッケージの責務ではありません。呼び出し側が用意した
-// io.Reader を解析するだけなので、HTTP でもファイルでもテスト用の文字列でも同じ経路です。
+// Fetching (HTTP access) is not this package's responsibility. It only parses the io.Reader the caller
+// provides, so HTTP, a file and a test string all take the same path.
 //
-// # 本文抽出のルール
+// # Extraction rules
 //
-// 「記事本文だけを残す」ことを目的にしたヒューリスティックで、次の順に処理します。
+// A heuristic aimed at keeping only the article body, applied in this order.
 //
-// 0. 文字コードを判定する。BOM → Content-Type の charset → <meta charset> →
-// 本文のバイト列、の順に判定して UTF-8 に変換します。パーサは入力を UTF-8 とみなすため、
-// これが無いと非 UTF-8 のページが丸ごと文字化けします。Content-Type ヘッダーが
-// 手元にあるなら TextWithContentType に渡してください。
+// 0. Detect the charset. It is determined in the order BOM → Content-Type charset → <meta charset> →
+// the body bytes, and converted to UTF-8. The parser assumes UTF-8 input, so without this a
+// non-UTF-8 page comes out entirely garbled. If you have the Content-Type header, pass it to
+// TextWithContentType.
 //
-// 1. ノイズを落とす。script、style、form、nav、aside、noscript、template、
-// [hidden]、[aria-hidden="true"]、および広告・SNS・コメント欄まわりのクラス
-// （.related-posts、.social-share、.comments、.ad-banner、.advertisement）を
-// ページ全体から除去します。noscript / template はパーサからは中身がただの
-// テキストに見えるため、落とさないと囲っている段落の本文に混ざります。
+// 1. Drop noise. script, style, form, nav, aside, noscript, template,
+// [hidden], [aria-hidden="true"], and the classes around ads, social buttons and comments
+// (.related-posts, .social-share, .comments, .ad-banner, .advertisement) are removed
+// from the whole page. The parser sees the contents of noscript / template as plain
+// text, so unless they are dropped they mix into the enclosing paragraph's text.
 //
-// 2. 本文の範囲を決める。article、main、div[role='main']、#main、#content、
-// .post-content、.article-body、.entry-content、.markdown-body、.readme に
-// 最初に一致した要素を本文とします。見つからない場合はページ全体を本文とみなし、
-// そのときだけ header / footer / .sidebar も落とします（記事の内側の header は
-// 見出しを、footer は署名を含むことがあるため、常に落とすと本文が欠けます）。
+// 2. Decide the extent of the body. The first element matching article, main, div[role='main'],
+// #main, #content, .post-content, .article-body, .entry-content, .markdown-body or .readme
+// is the body. If none is found the whole page is taken as the body, and only then are
+// header / footer / .sidebar dropped too (inside an article a header may hold the heading and a
+// footer the byline, so always dropping them would lose part of the body).
 //
-// 3. ブロック要素を順に拾う。p、h1〜h6、li、dt、dd、figcaption、blockquote、
-// table、pre を DOM の出現順に走査します。入れ子（<li><p>…</p></li> など）は
-// 一度だけ出力され、表の中身は表の行としてだけ出ます。<br> は空白として扱います。
-// 出力の形は次のとおりです。
+// 3. Pick up block elements in order. p, h1-h6, li, dt, dd, figcaption, blockquote,
+// table and pre are scanned in DOM order. Nesting (<li><p>…</p></li> and the like) is
+// emitted only once, and a table's contents come out only as table rows. <br> is treated as a space.
+// The output looks like this:
 //
-//   - title — 「【記事タイトル】 」を付けて先頭に
-//   - h1〜h6 — 「## 」を付ける（MinHeadingLength 文字以上のもの）
-//   - p, blockquote — MinParagraphLength 文字以上のものだけ
-//   - li, dt, dd, figcaption — 長さを問わず出力（短くても項目として意味を持つため）
-//   - table — 「【表題】 」付きキャプションと「セル | セル」の行。セルの中は
-//     長さを問わず平坦化し、空の行は出力しない
-//   - pre — コードフェンスで囲む
+//   - title — first, prefixed with 「【記事タイトル】 」
+//   - h1-h6 — prefixed with "## " (only those of at least MinHeadingLength characters)
+//   - p, blockquote — only those of at least MinParagraphLength characters
+//   - li, dt, dd, figcaption — emitted at any length (they carry meaning as items even when short)
+//   - table — a caption prefixed with 「【表題】 」 and "cell | cell" rows. Cell contents are
+//     flattened at any length, and empty rows are not emitted
+//   - pre — wrapped in a code fence
 //
-// しきい値はバイト数ではなく文字数で測ります。len() だと日本語は 1 文字 3 バイトで
-// しきい値が実質 1/3 になり、ナビゲーションの断片が本文として残ります。
+// Thresholds are measured in characters, not bytes. With len(), Japanese takes 3 bytes per character,
+// so the thresholds would effectively be one third and navigation fragments would survive as body text.
 package extract
 
 import (
@@ -52,69 +52,69 @@ import (
 	"golang.org/x/net/html/charset"
 )
 
-// Engine は状態を持たない抽出エンジンです。ゼロ値のまま使えます。
-// 中身は Text と同じで、インターフェース値として渡したい呼び出し側のための型です。
+// Engine is a stateless extraction engine. Its zero value is ready to use.
+// It does the same as Text, and exists for callers that want to pass it as an interface value.
 type Engine struct{}
 
-// Extract は取得済みのHTMLコンテンツから整形されたテキストを抽出します。
+// Extract extracts formatted text from already-fetched HTML content.
 func (Engine) Extract(ctx context.Context, r io.Reader) (string, bool, error) {
 	return Text(ctx, r)
 }
 
-// ExtractWithContentType は Content-Type ヘッダーを添えて Extract します。
-// 文字コードの判定にヘッダーの charset を使える分だけ Extract より正確です。
+// ExtractWithContentType is Extract with the Content-Type header supplied.
+// It is more accurate than Extract to the extent that the header's charset can be used to detect the charset.
 func (Engine) ExtractWithContentType(ctx context.Context, r io.Reader, contentType string) (string, bool, error) {
 	return TextWithContentType(ctx, r, contentType)
 }
 
-// Text は取得済みのHTMLコンテンツから整形されたテキストを抽出します。
+// Text extracts formatted text from already-fetched HTML content.
 //
-// 第2戻り値は本文が見つかったかどうかです。タイトルしか取れなかった場合は
-// テキストを返しつつ false になります（エラーではありません）。
+// The second return value reports whether a body was found. When only the title could be taken,
+// the text is returned and the value is false (this is not an error).
 func Text(ctx context.Context, r io.Reader) (text string, hasBodyFound bool, err error) {
 	return TextWithContentType(ctx, r, "")
 }
 
-// TextWithContentType は、Content-Type ヘッダーの値を添えて Text します。
+// TextWithContentType is Text with the value of the Content-Type header supplied.
 //
-// 文字コードはヘッダーの charset が <meta charset> より優先されます。<meta> で
-// 宣言しない Shift_JIS / EUC-JP のページはヘッダーだけが手がかりなので、手元に
-// あるなら渡してください。contentType が空なら Text と同じです。
+// For the charset, the header's charset takes precedence over <meta charset>. For a Shift_JIS /
+// EUC-JP page that does not declare it in <meta>, the header is the only clue, so pass it if you
+// have it. An empty contentType behaves like Text.
 func TextWithContentType(ctx context.Context, r io.Reader, contentType string) (text string, hasBodyFound bool, err error) {
 	if err := ctx.Err(); err != nil {
 		return "", false, err
 	}
 
-	// パーサは入力を UTF-8 とみなすため、先に変換する。
+	// The parser assumes UTF-8 input, so convert first.
 	decoded, err := charset.NewReader(r, contentType)
 	if err != nil {
-		return "", false, fmt.Errorf("文字コードの判定に失敗しました: %w", err)
+		return "", false, fmt.Errorf("failed to detect charset: %w", err)
 	}
 
 	doc, err := goquery.NewDocumentFromReader(decoded)
 	if err != nil {
-		return "", false, fmt.Errorf("HTML解析に失敗しました: %w", err)
+		return "", false, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
 	return extractContentText(doc)
 }
 
-// extractContentText はgoquery.Documentから本文とタイトルを抽出し、整形します。
+// extractContentText extracts and formats the body and title from a goquery.Document.
 func extractContentText(doc *goquery.Document) (text string, hasBodyFound bool, err error) {
 	var parts []string
 
-	// タイトルは <head> にあるため、本文の絞り込みより先に取る。
+	// The title is in <head>, so take it before narrowing down to the body.
 	pageTitle := normalizeSpace(doc.FindMatcher(titleMatcher).First().Text())
 	if pageTitle != "" {
 		parts = append(parts, titlePrefix+pageTitle)
 	}
 
-	// ノイズは本文候補を決める前にページ全体から落とす。あとから落とすと
-	// <aside> の中の <article> を本文に選ぶ余地が残る。
+	// Noise is dropped from the whole page before the main-content candidate is chosen. Dropping it
+	// afterwards would leave room to pick an <article> inside an <aside> as the body.
 	doc.FindMatcher(noiseMatcher).Remove()
 
-	// 入れ子のブロックは親子とも訪問される。二重に出さないのは ownText の役目で、
-	// 表の中身だけは表が行として出すので、ここで飛ばす。
+	// Nested blocks are visited as both parent and child. Not emitting them twice is ownText's job;
+	// only a table's contents are emitted by the table as rows, so they are skipped here.
 	mainContent := findMainContent(doc)
 	bodyStart := len(parts)
 	mainContent.FindMatcher(blockMatcher).Each(func(_ int, s *goquery.Selection) {
@@ -126,10 +126,10 @@ func extractContentText(doc *goquery.Document) (text string, hasBodyFound bool, 
 		}
 	})
 
-	// 段落要素を 1 つも使わず <div> と <br> で本文を書くページ（古いブログや CMS の
-	// 直書き）は、上の走査では丸ごと落ちる。ブロックが 1 つも本文を出さなかったときに
-	// 限って、葉の箱要素の直下テキストを段落として拾う。ブロックが 1 つでもあれば
-	// そちらを信じる（混在ページで箱の端書きまで拾わないため）。
+	// A page that writes its body with <div> and <br> and no paragraph elements at all (old blogs,
+	// hand-written CMS output) is lost entirely by the scan above. Only when no block produced any
+	// body text, pick up the direct text of leaf containers as paragraphs. If there is even one block,
+	// trust it instead (so that a mixed page's container asides are not picked up).
 	if len(parts) == bodyStart {
 		parts = append(parts, collectContainerParagraphs(mainContent)...)
 	}
@@ -137,16 +137,16 @@ func extractContentText(doc *goquery.Document) (text string, hasBodyFound bool, 
 	return validateAndFormatResult(parts)
 }
 
-// collectContainerParagraphs は、ブロック要素を子孫に持たない箱要素（div / section /
-// article）の直下テキストを、<br> の区切りごとに段落として集めます。
-// MinParagraphLength に満たない行は、<p> と同じ規則で落とします。
+// collectContainerParagraphs collects the direct text of containers (div / section / article) with no
+// block-element descendants as paragraphs, one per <br>-separated line.
+// Lines shorter than MinParagraphLength are dropped by the same rule as <p>.
 func collectContainerParagraphs(root *goquery.Selection) []string {
 	var parts []string
 	root.FindMatcher(containerMatcher).Each(func(_ int, s *goquery.Selection) {
 		if insideTable(s.Get(0)) {
 			return
 		}
-		// 入れ子の箱は内側だけを見る。外側も拾うと同じ文が二度出る。
+		// For nested containers, look only at the innermost. Picking up the outer one too emits the same text twice.
 		if s.FindMatcher(containerMatcher).Length() > 0 || s.FindMatcher(blockMatcher).Length() > 0 {
 			return
 		}
@@ -163,14 +163,15 @@ func collectContainerParagraphs(root *goquery.Selection) []string {
 	return parts
 }
 
-// findMainContent は本文が入っている範囲を返します。
+// findMainContent returns the part of the document that holds the body.
 func findMainContent(doc *goquery.Document) *goquery.Selection {
 	if mainContent := doc.FindMatcher(mainContentMatcher).First(); mainContent.Length() > 0 {
 		return mainContent
 	}
 
-	// 本文候補が無ければページ全体を本文とし、囲み要素を DOM から取り除く。
-	// goquery の Not は選択中のノード自身しか絞り込まず子孫に効かないので、Remove で消す。
+	// With no main-content candidate, take the whole page as the body and remove the framing elements
+	// from the DOM. goquery's Not filters only the selected nodes themselves, not their descendants, so
+	// Remove is used.
 	body := doc.FindMatcher(bodyMatcher).First()
 	if body.Length() == 0 {
 		body = doc.Selection
@@ -180,13 +181,13 @@ func findMainContent(doc *goquery.Document) *goquery.Selection {
 	return body
 }
 
-// processBlock はブロック要素 1 つ分の出力を返します。出力しない場合は空文字列です。
+// processBlock returns the output for one block element, or an empty string when nothing is emitted.
 func processBlock(s *goquery.Selection) string {
 	switch tagName(s) {
 	case "table":
 		return processTable(s)
 	case "pre":
-		// 整形済みテキストなので normalizeSpace は通さず、字下げを保つ。
+		// Preformatted text: skip normalizeSpace and keep the indentation.
 		preText := strings.TrimSpace(s.Text())
 		if preText == "" {
 			return ""
@@ -197,11 +198,11 @@ func processBlock(s *goquery.Selection) string {
 	}
 }
 
-// validateAndFormatResult は抽出結果を 1 本のテキストに連結します。
-// タイトルしか取れなかった場合は、テキストを返しつつ本文なしとして報告します。
+// validateAndFormatResult joins the extraction results into one text.
+// When only the title could be taken, it returns the text but reports that no body was found.
 func validateAndFormatResult(parts []string) (text string, hasBodyFound bool, err error) {
 	if len(parts) == 0 {
-		return "", false, fmt.Errorf("webページから何も抽出できませんでした")
+		return "", false, fmt.Errorf("nothing could be extracted from the web page")
 	}
 	isTitleOnly := len(parts) == 1 && strings.HasPrefix(parts[0], titlePrefix)
 	if isTitleOnly {
