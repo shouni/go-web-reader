@@ -8,7 +8,7 @@ import (
 	"github.com/shouni/go-web-reader/extract"
 )
 
-// realisticDoc は記事ページを模した HTML を生成します。
+// realisticDoc generates HTML that imitates an article page.
 func realisticDoc(sections int) string {
 	var b strings.Builder
 	b.WriteString(`<html><head><title>Benchmark Article</title></head><body>
@@ -42,11 +42,11 @@ func BenchmarkText(b *testing.B) {
 	}
 }
 
-// BenchmarkTextCharset は文字コード判定の経路ごとのコストを測ります。
+// BenchmarkTextCharset measures the cost of each charset-detection path.
 //
-// 宣言の無い UTF-8（高位ビットあり）だけが変換なしで済み、それ以外は
-// transform.Reader を 1 枚挟みます。ASCII だけの文書は判定材料が無いため
-// 既定の windows-1252 として復号されます（ASCII の範囲では恒等変換）。
+// Only undeclared UTF-8 (with high bits set) needs no conversion; everything else goes through one
+// transform.Reader. An ASCII-only document has nothing to go on, so it is decoded as the default
+// windows-1252 (an identity transform within the ASCII range).
 func BenchmarkTextCharset(b *testing.B) {
 	ascii := realisticDoc(100)
 	japanese := strings.ReplaceAll(ascii, "This is a", "これは日本語の")

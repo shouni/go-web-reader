@@ -9,7 +9,7 @@ import (
 
 var _ ContentTypeExtractor = (*contentTypeExtractorStub)(nil)
 
-// contentTypeExtractorStub は Content-Type も受け取れる抽出器です。
+// contentTypeExtractorStub is an extractor that also accepts the Content-Type.
 type contentTypeExtractorStub struct {
 	stubExtractor
 	gotContentType string
@@ -53,8 +53,8 @@ func TestOpenHTTPUsesExtractor(t *testing.T) {
 	}
 }
 
-// 抽出器が Content-Type を受け取れるなら、解析済みの media type ではなく
-// 生のヘッダーが渡ること。文字コードは charset パラメータ側にあります。
+// When the extractor accepts the Content-Type, it must receive the raw header rather than the
+// parsed media type. The charset lives in the charset parameter.
 func TestExtractorReceivesRawContentType(t *testing.T) {
 	t.Parallel()
 
@@ -71,7 +71,7 @@ func TestExtractorReceivesRawContentType(t *testing.T) {
 	defer func() { _ = stream.Close() }()
 
 	if extractor.calls != 1 {
-		t.Fatalf("ExtractWithContentType の呼び出し回数 = %d, want 1", extractor.calls)
+		t.Fatalf("ExtractWithContentType calls = %d, want 1", extractor.calls)
 	}
 	if extractor.gotContentType != "text/html; charset=Shift_JIS" {
 		t.Fatalf("contentType = %q, want %q", extractor.gotContentType, "text/html; charset=Shift_JIS")
@@ -172,7 +172,7 @@ func TestOpenHTTPUnsupportedContentTypeReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "未対応のContent-Type") {
+	if !strings.Contains(err.Error(), "unsupported Content-Type") {
 		t.Fatalf("Open() error = %v", err)
 	}
 	if extractor.extractCalls != 0 {
@@ -220,7 +220,7 @@ func TestOpenHTTPMalformedContentTypeDoesNotFallbackOnPartialMatch(t *testing.T)
 	if err == nil {
 		t.Fatal("Open() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "Content-Typeの解析に失敗しました") {
+	if !strings.Contains(err.Error(), "failed to parse Content-Type") {
 		t.Fatalf("Open() error = %v", err)
 	}
 	if extractor.extractCalls != 0 {
@@ -240,7 +240,7 @@ func TestOpenHTTPNoBodyReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "コンテンツが見つかりませんでした") {
+	if !strings.Contains(err.Error(), "no content found") {
 		t.Fatalf("Open() error = %v", err)
 	}
 }

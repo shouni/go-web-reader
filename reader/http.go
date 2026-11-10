@@ -9,20 +9,20 @@ import (
 	"strings"
 )
 
-// mediaKind は media type から決まる本文の扱い方です。
+// mediaKind is how a body is handled, as decided by its media type.
 type mediaKind int
 
 const (
-	// mediaKindUnsupported は本リーダーが扱わない media type です。
+	// mediaKindUnsupported is a media type this reader does not handle.
 	mediaKindUnsupported mediaKind = iota
-	// mediaKindHTML は本文抽出エンジンに通す media type です。
+	// mediaKindHTML is a media type run through the main-content extraction engine.
 	mediaKindHTML
-	// mediaKindPassthrough は変換せずそのまま返す media type です。
+	// mediaKindPassthrough is a media type returned as is, without conversion.
 	mediaKindPassthrough
 )
 
-// mediaKinds は既知の media type と扱い方の対応表です。対応 Content-Type を
-// 増やすときはここだけを更新します（分岐と壊れたヘッダーの救済の両方に効きます）。
+// mediaKinds maps known media types to how they are handled. To support another Content-Type,
+// update only this table (it drives both the dispatch and the rescue of broken headers).
 var mediaKinds = map[string]mediaKind{
 	"text/html":             mediaKindHTML,
 	"application/xhtml+xml": mediaKindHTML,
@@ -35,8 +35,8 @@ var mediaKinds = map[string]mediaKind{
 	"text/xml":              mediaKindPassthrough,
 }
 
-// classifyMediaType は media type の扱い方を返します。
-// image/* はサブタイプを問わずバイナリとしてそのまま通します。
+// classifyMediaType returns how a media type is handled.
+// image/* passes through as binary whatever the subtype.
 func classifyMediaType(mediaType string) mediaKind {
 	if kind, ok := mediaKinds[mediaType]; ok {
 		return kind
@@ -47,8 +47,8 @@ func classifyMediaType(mediaType string) mediaKind {
 	return mediaKindUnsupported
 }
 
-// openHTTP は HTTP(S) URI を Content-Type ごとに処理して読み取りストリームを返します。
-// 取得を fetchBytes に一本化しているので、レスポンスサイズ上限はどの Content-Type にも等しくかかります。
+// openHTTP handles an HTTP(S) URI by Content-Type and returns a read stream.
+// All fetching goes through fetchBytes, so the response size cap applies equally to every Content-Type.
 func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadCloser, error) {
 	got, err := r.fetchBytes(ctx, uri)
 	if err != nil {
@@ -57,37 +57,37 @@ func (r *UniversalReader) openHTTP(ctx context.Context, uri string) (io.ReadClos
 
 	contentType, err := resolveMediaType(got.contentType)
 	if err != nil {
-		return nil, fmt.Errorf("Content-Typeの解析に失敗しました: %w", err)
+		return nil, fmt.Errorf("failed to parse Content-Type: %w", err)
 	}
 
 	switch classifyMediaType(contentType) {
 	case mediaKindHTML:
-		// 抽出器には生のヘッダーを渡す。文字コードは charset パラメータ側にある。
+		// Pass the raw header to the extractor; the charset is in the charset parameter.
 		return r.openExtractedHTML(ctx, uri, bytes.NewReader(got.body), got.contentType)
 	case mediaKindPassthrough:
 		return io.NopCloser(bytes.NewReader(got.body)), nil
 	default:
 		if contentType == "" {
-			return nil, fmt.Errorf("未対応のContent-Typeです: %s", uri)
+			return nil, fmt.Errorf("unsupported Content-Type: %s", uri)
 		}
-		return nil, fmt.Errorf("未対応のContent-Typeです: %s (%s)", uri, contentType)
+		return nil, fmt.Errorf("unsupported Content-Type: %s (%s)", uri, contentType)
 	}
 }
 
-// openExtractedHTML は取得済み HTML から本文テキストを抽出して読み取りストリームを返します。
+// openExtractedHTML extracts the main text from fetched HTML and returns a read stream.
 func (r *UniversalReader) openExtractedHTML(ctx context.Context, uri string, body io.Reader, contentType string) (io.ReadCloser, error) {
 	text, hasBody, err := r.extractText(ctx, body, contentType)
 	if err != nil {
 		return nil, err
 	}
 	if !hasBody {
-		return nil, fmt.Errorf("コンテンツが見つかりませんでした: %s", uri)
+		return nil, fmt.Errorf("no content found: %s", uri)
 	}
 
 	return io.NopCloser(strings.NewReader(text)), nil
 }
 
-// extractText は、抽出器が Content-Type を受け取れるならそれを添えて抽出します。
+// extractText extracts, passing the Content-Type along when the extractor accepts it.
 func (r *UniversalReader) extractText(ctx context.Context, body io.Reader, contentType string) (string, bool, error) {
 	if extractor, ok := r.extractor.(ContentTypeExtractor); ok {
 		return extractor.ExtractWithContentType(ctx, body, contentType)
@@ -95,15 +95,16 @@ func (r *UniversalReader) extractText(ctx context.Context, body io.Reader, conte
 	return r.extractor.Extract(ctx, body)
 }
 
-// resolveMediaType は Content-Type ヘッダーから media type だけを取り出します。
+// resolveMediaType extracts only the media type from a Content-Type header.
 //
-// RFC に沿わないヘッダー（charset の引用符の閉じ忘れなど、実在するサーバーが返すもの）
-// でも、";" より前が既知の media type なら採用します。未知のものまで救うと壊れたヘッダーを
-// 根拠に中身を誤解釈するので、その場合は解析エラーを返します。
+// A header that does not follow the RFC (such as an unclosed quote around charset, which real
+// servers do return) is still accepted when the part before ";" is a known media type. Rescuing
+// unknown ones too would misinterpret the content on the strength of a broken header, so those
+// return the parse error.
 //
-// 救うのは "type/subtype" の形をしているものだけです。classifyMediaType は image/ を
-// 前方一致で通すため、この検査が無いと "image/ 0" のような壊れた値まで画像として
-// 扱われます（戻り値も media type として使えない文字列になります）。
+// Only values shaped "type/subtype" are rescued. classifyMediaType passes image/ by prefix match,
+// so without this check a broken value such as "image/ 0" would be handled as an image (and the
+// return value would be a string unusable as a media type).
 func resolveMediaType(contentType string) (string, error) {
 	if contentType == "" {
 		return "", nil
@@ -125,8 +126,8 @@ func resolveMediaType(contentType string) (string, error) {
 	return "", err
 }
 
-// isMediaTypeToken は、値が "type/subtype" の形をしているかを返します。
-// RFC 9110 の token に沿って、空白・区切り文字・制御文字を認めません。
+// isMediaTypeToken reports whether the value has the shape "type/subtype".
+// Following RFC 9110's token, it allows no whitespace, delimiters or control characters.
 func isMediaTypeToken(mediaType string) bool {
 	slash := strings.IndexByte(mediaType, '/')
 	if slash <= 0 || slash == len(mediaType)-1 {
@@ -140,7 +141,7 @@ func isMediaTypeToken(mediaType string) bool {
 	return strings.IndexByte(mediaType[slash+1:], '/') < 0
 }
 
-// isTokenChar は、RFC 9110 の token を構成する文字かを返します。
+// isTokenChar reports whether c is a character that can make up an RFC 9110 token.
 func isTokenChar(c byte) bool {
 	switch {
 	case c >= 'a' && c <= 'z', c >= '0' && c <= '9':

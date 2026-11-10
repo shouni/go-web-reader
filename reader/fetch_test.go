@@ -18,7 +18,7 @@ var (
 	_ RetryClassifier = (*neverRetryClient)(nil)
 )
 
-// response は scriptedHTTPClient が 1 回の Do で返す内容です。
+// response is what scriptedHTTPClient returns from one Do.
 type response struct {
 	statusCode  int
 	contentType string
@@ -27,9 +27,9 @@ type response struct {
 	err         error
 }
 
-// scriptedHTTPClient は呼ばれるたびに次の応答を返します。
-// 台本を使い切ったあとは最後の応答を繰り返すため、「何回目で成功したか」を
-// 数える用途でも、リトライ回数の上限を確かめる用途でも使えます。
+// scriptedHTTPClient returns the next response on every call.
+// Once the script runs out it repeats the last response, so it serves both for counting on which
+// attempt a fetch succeeded and for checking the retry limit.
 type scriptedHTTPClient struct {
 	script []response
 	calls  int
@@ -60,14 +60,14 @@ func (c *scriptedHTTPClient) Do(*http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// neverRetryClient は、自分の返すエラーを「やり直す価値なし」と判断するクライアントです。
+// neverRetryClient is a client that judges its own errors not worth retrying.
 type neverRetryClient struct {
 	scriptedHTTPClient
 }
 
 func (c *neverRetryClient) IsHTTPRetryableError(error) bool { return false }
 
-// newRetryingTestReader は、待ち時間をテスト向けに詰めたリーダーを返します。
+// newRetryingTestReader returns a reader with waits shortened for tests.
 func newRetryingTestReader(t *testing.T, client HTTPClient, opts ...Option) *UniversalReader {
 	t.Helper()
 
@@ -79,9 +79,9 @@ func newRetryingTestReader(t *testing.T, client HTTPClient, opts ...Option) *Uni
 	return newTestReader(t, &stubExtractor{text: "extracted", hasBody: true}, append(baseOpts, opts...)...)
 }
 
-// 一時的な失敗（5xx / 通信エラー）はやり直すこと。
-// 既定のクライアントはリトライ付きで構築されますが、Do を直接呼ぶ経路には
-// リトライが掛からないため、取得のやり直しは reader 側の責任です。
+// Transient failures (5xx / network errors) must be retried.
+// The default client is built with retries, but the path that calls Do directly gets none, so
+// retrying the fetch is the reader's responsibility.
 func TestFetchRetriesTransientFailures(t *testing.T) {
 	t.Parallel()
 
@@ -128,7 +128,7 @@ func TestFetchRetriesTransientFailures(t *testing.T) {
 	}
 }
 
-// 繰り返しても結果が変わらない失敗はやり直さないこと。
+// Failures that would not change on repetition must not be retried.
 func TestFetchDoesNotRetryPermanentFailures(t *testing.T) {
 	t.Parallel()
 
@@ -157,8 +157,8 @@ func TestFetchDoesNotRetryPermanentFailures(t *testing.T) {
 	}
 }
 
-// WithMaxRetries(0) はやり直しを止めること。
-// 自前のリトライ付きクライアントを注入する利用者が、二重に待たされないための口です。
+// WithMaxRetries(0) must stop retries.
+// It is the seam for callers who inject their own retrying client, so they do not wait twice.
 func TestFetchRetryCanBeDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -173,7 +173,7 @@ func TestFetchRetryCanBeDisabled(t *testing.T) {
 	}
 }
 
-// リトライ回数の上限を超えないこと（初回 + WithMaxRetries 回）。
+// The retry limit must not be exceeded (the first attempt + WithMaxRetries).
 func TestFetchStopsAtMaxRetries(t *testing.T) {
 	t.Parallel()
 
@@ -184,12 +184,12 @@ func TestFetchStopsAtMaxRetries(t *testing.T) {
 		t.Fatal("Open() error = nil, want error")
 	}
 	if client.calls != 4 {
-		t.Fatalf("client.calls = %d, want 4 (初回 + 3 回)", client.calls)
+		t.Fatalf("client.calls = %d, want 4 (first attempt + 3)", client.calls)
 	}
 }
 
-// 待機時間の上限を超える Retry-After には従わず、待たずに打ち切ること。
-// 叩く先は利用者が入力した URL なので、上限が無いと相手に待ち時間を決めさせることになります。
+// A Retry-After beyond the wait bound must not be honoured; give up without waiting.
+// The target is a URL the user entered, so without a bound the other side would decide how long we wait.
 func TestFetchStopsOnRetryAfterBeyondMaxInterval(t *testing.T) {
 	t.Parallel()
 
@@ -207,11 +207,11 @@ func TestFetchStopsOnRetryAfterBeyondMaxInterval(t *testing.T) {
 		t.Errorf("client.calls = %d, want 1", client.calls)
 	}
 	if waited := time.Since(start); waited > time.Second {
-		t.Errorf("打ち切るべきところで %v 待ちました", waited)
+		t.Errorf("waited %v where it should have given up", waited)
 	}
 }
 
-// 上限以内の Retry-After には従うこと。
+// A Retry-After within the bound must be honoured.
 func TestFetchHonorsRetryAfterWithinMaxInterval(t *testing.T) {
 	t.Parallel()
 
@@ -229,7 +229,7 @@ func TestFetchHonorsRetryAfterWithinMaxInterval(t *testing.T) {
 	}
 }
 
-// nilResponseClient は (nil, nil) を返す、規約を守らない HTTPClient です。
+// nilResponseClient is an HTTPClient that breaks the contract by returning (nil, nil).
 type nilResponseClient struct{ calls int }
 
 func (c *nilResponseClient) Do(*http.Request) (*http.Response, error) {
@@ -237,8 +237,8 @@ func (c *nilResponseClient) Do(*http.Request) (*http.Response, error) {
 	return nil, nil
 }
 
-// 差し替えたクライアントが (nil, nil) を返しても panic せず、ErrNilResponse で
-// 再試行なしに戻ること。ヘッダーを読む前に HandleResponse の nil チェックを通す配線です。
+// A swapped client returning (nil, nil) must not panic, and must return ErrNilResponse without
+// retrying. This pins the wiring that runs HandleResponse's nil check before the headers are read.
 func TestFetchRejectsNilResponseWithoutPanic(t *testing.T) {
 	t.Parallel()
 
@@ -250,12 +250,12 @@ func TestFetchRejectsNilResponseWithoutPanic(t *testing.T) {
 		t.Fatalf("Open() error = %v, want httpkit.ErrNilResponse", err)
 	}
 	if client.calls != 1 {
-		t.Errorf("client.calls = %d, want 1（形の問題は再試行しない）", client.calls)
+		t.Errorf("client.calls = %d, want 1 (malformed responses are not retried)", client.calls)
 	}
 }
 
-// クライアント自身がリトライ可否を判断できるなら、その判断に従うこと。
-// エラーの型を知っているのはそれを返したクライアントです。
+// When the client itself can decide whether to retry, its decision must be followed.
+// The client that returned an error is the one that knows its type.
 func TestFetchDefersToClientRetryClassification(t *testing.T) {
 	t.Parallel()
 

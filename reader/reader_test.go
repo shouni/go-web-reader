@@ -11,9 +11,8 @@ import (
 	"github.com/shouni/go-remote-io/remoteio"
 )
 
-// 依存ライブラリ側のインターフェースが変わったとき、スタブの追従漏れを
-// テスト実行時ではなくビルド時に検出するためのアサーション。
-// （go-remote-io v1.7.0 の List への ListOption 追加のような変更を取りこぼさないため）
+// Assertions that catch a stub falling behind a dependency's interface change at build time rather
+// than at test time (so that a change like go-remote-io v1.7.0 adding ListOption to List is not missed).
 var (
 	_ Extractor  = (*stubExtractor)(nil)
 	_ HTTPClient = (*stubHTTPClient)(nil)
@@ -68,7 +67,7 @@ func (s *stubHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// headerOverridingClient は、既定のヘッダーを上書きしてから委譲するクライアントです。
+// headerOverridingClient is a client that overrides the default headers before delegating.
 type headerOverridingClient struct {
 	inner     HTTPClient
 	userAgent string
@@ -99,11 +98,11 @@ func TestNewAcceptsDoOnlyHTTPClientWithDefaultExtractor(t *testing.T) {
 		WithSafeURLValidator(func(context.Context, string) error { return nil }),
 	)
 	if r.extractor == nil {
-		t.Fatal("既定の抽出器が設定されていない")
+		t.Fatal("the default extractor is not set")
 	}
 }
 
-// nil を渡したオプションは無視され、既定値が保たれること。
+// Options given nil must be ignored, keeping the defaults.
 func TestNilOptionsAreIgnored(t *testing.T) {
 	t.Parallel()
 
@@ -111,7 +110,7 @@ func TestNilOptionsAreIgnored(t *testing.T) {
 		name string
 		opt  Option
 	}{
-		{name: "nil の Option そのもの", opt: nil},
+		{name: "nil Option itself", opt: nil},
 		{name: "safe URL validator", opt: WithSafeURLValidator(nil)},
 		{name: "GCS factory", opt: WithGCSFactory(nil)},
 		{name: "S3 factory", opt: WithS3Factory(nil)},
@@ -125,19 +124,19 @@ func TestNilOptionsAreIgnored(t *testing.T) {
 
 			r := New(WithExtractor(&stubExtractor{}), tt.opt)
 			if r.safeURL == nil || r.extractor == nil || r.httpClient == nil {
-				t.Fatal("nil オプションで既定の依存が失われている")
+				t.Fatal("a nil option lost a default dependency")
 			}
 			for _, scheme := range []string{remoteio.SchemeGCS, remoteio.SchemeS3} {
 				if storageCache(t, r, scheme).newFactory == nil {
-					t.Fatalf("%s のファクトリが失われている", scheme)
+					t.Fatalf("the %s factory was lost", scheme)
 				}
 			}
 		})
 	}
 }
 
-// リクエストのヘッダーは WithHTTPClient から差し替えられること。
-// 取得処理を丸ごと差し替える口は無いので、ヘッダーを変えたい利用者はこの経路に頼る。
+// Request headers must be swappable through WithHTTPClient.
+// There is no seam that replaces the whole fetch, so callers who want other headers rely on this path.
 func TestWithHTTPClientCanOverrideRequestHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -202,7 +201,7 @@ func TestOpenRejectsUnsupportedScheme(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "未対応のURIスキームです") {
+	if !strings.Contains(err.Error(), "unsupported URI scheme") {
 		t.Fatalf("Open() error = %v", err)
 	}
 }
@@ -221,8 +220,8 @@ func TestOpenWrapsSafeURLValidatorError(t *testing.T) {
 	}
 }
 
-// URL 安全性検証は HTTP(S) にだけ掛かること。
-// 接続先をクラウド SDK が決める gs:// / s3:// に対しては、検証する相手がいません。
+// The URL safety check must apply only to HTTP(S).
+// For gs:// / s3://, where the cloud SDK decides where to connect, there is no peer to check.
 func TestSafeURLValidatorRunsOnlyForHTTP(t *testing.T) {
 	t.Parallel()
 
@@ -264,13 +263,13 @@ func TestSafeURLValidatorRunsOnlyForHTTP(t *testing.T) {
 			}
 
 			if called := len(validated) > 0; called != tt.wantCalled {
-				t.Fatalf("検証器の呼び出し = %v (%v), want %v", called, validated, tt.wantCalled)
+				t.Fatalf("validator called = %v (%v), want %v", called, validated, tt.wantCalled)
 			}
 		})
 	}
 }
 
-// 解放するものが無い HTTP でも Close は終端であること。
+// Close must be terminal even for HTTP, which has nothing to release.
 func TestOpenHTTPAfterCloseIsRejected(t *testing.T) {
 	t.Parallel()
 
@@ -285,11 +284,11 @@ func TestOpenHTTPAfterCloseIsRejected(t *testing.T) {
 		t.Fatalf("Open() after Close error = %v, want ErrClosed", err)
 	}
 	if client.calls != 0 {
-		t.Fatalf("client.calls = %d, want 0 (Close 後に取得してはいけない)", client.calls)
+		t.Fatalf("client.calls = %d, want 0 (must not fetch after Close)", client.calls)
 	}
 }
 
-// ReadAll は開いて読み切って閉じるまでを行うこと。
+// ReadAll must open, read to the end and close.
 func TestReadAllReadsWholeContent(t *testing.T) {
 	t.Parallel()
 
@@ -307,8 +306,8 @@ func TestReadAllReadsWholeContent(t *testing.T) {
 	}
 }
 
-// ReadAll に上限は無く、gs:// / s3:// は HTTP の 25MB も掛からない。上限つきの読み切りを
-// 各サービスが書いていたので、その手順（1 バイト多く読んで超過を見分ける）を固定する。
+// ReadAll has no limit, and gs:// / s3:// do not even get HTTP's 25MB. Each service was writing a
+// bounded read itself, so this pins that routine (read one byte more to tell an overflow).
 func TestReadAllLimit(t *testing.T) {
 	t.Parallel()
 
@@ -328,7 +327,7 @@ func TestReadAllLimit(t *testing.T) {
 	}
 }
 
-// ReadText は上限で切り捨て、多バイト文字の途中で切れた末尾を落とす。
+// ReadText truncates at the limit and drops a tail cut inside a multi-byte character.
 func TestReadTextTruncatesAtRuneBoundary(t *testing.T) {
 	t.Parallel()
 
