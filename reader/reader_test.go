@@ -110,7 +110,7 @@ func TestNilOptionsAreIgnored(t *testing.T) {
 		name string
 		opt  Option
 	}{
-		{name: "nil の Option そのもの", opt: nil},
+		{name: "nil Option itself", opt: nil},
 		{name: "safe URL validator", opt: WithSafeURLValidator(nil)},
 		{name: "GCS factory", opt: WithGCSFactory(nil)},
 		{name: "S3 factory", opt: WithS3Factory(nil)},
