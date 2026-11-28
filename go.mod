@@ -6,7 +6,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.14.0
 	github.com/andybalholm/cascadia v1.3.5
 	github.com/shouni/go-http-kit v1.13.6
-	github.com/shouni/go-remote-io v1.13.22
+	github.com/shouni/go-remote-io v1.13.23
 	github.com/shouni/netarmor v1.4.4
 	golang.org/x/net v0.63.0
 )
